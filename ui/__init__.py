@@ -33,6 +33,11 @@ from .helpers import (
     HAS_QTAWESOME,
 )
 
+from .themes import (
+    LIGHT_THEME_FALLBACK,
+    DARK_THEME_CUSTOM,
+)
+
 def __getattr__(name):
     """Lazy loading for MainWindow to avoid circular import"""
     if name == 'MainWindow':
@@ -64,4 +69,6 @@ __all__ = [
     'ICONS',
     'ICON_COLORS',
     'HAS_QTAWESOME',
+    'LIGHT_THEME_FALLBACK',
+    'DARK_THEME_CUSTOM',
 ]
