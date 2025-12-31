@@ -11,10 +11,10 @@ import random
 import concurrent.futures
 from pathlib import Path
 
-from core import NotificationSystem
+from core import NotificationSystem, log_error_to_file
 from core.constants import INTERNET_CHECK_INTERVAL, INTERNET_CHECK_MAX_ATTEMPTS
 from ui.signals import UiSignals
-from controllers.reels_controller import ReelsJob, log_error_to_file
+from controllers.reels_controller import ReelsJob
 
 
 class ReelsSchedulerThread(threading.Thread):
@@ -103,7 +103,7 @@ class ReelsSchedulerThread(threading.Thread):
         # Import from reels_controller
         from controllers.reels_controller import (
             get_reels_files, upload_reels_with_retry, is_reels_upload_successful,
-            log_error_to_file, check_reels_duration
+            check_reels_duration
         )
         from ui.main_window import (
             check_internet_connection, is_rate_limit_error,

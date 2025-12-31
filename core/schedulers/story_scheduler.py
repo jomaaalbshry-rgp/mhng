@@ -14,11 +14,11 @@ from pathlib import Path
 
 import requests
 
-from core import NotificationSystem
+from core import NotificationSystem, log_error_to_file
 from core.constants import INTERNET_CHECK_INTERVAL, INTERNET_CHECK_MAX_ATTEMPTS
 from core.utils import API_CALLS_PER_STORY, get_api_tracker, get_api_warning_system
 from ui.signals import UiSignals
-from controllers.story_controller import StoryJob, log_error_to_file
+from controllers.story_controller import StoryJob
 
 
 class StorySchedulerThread(threading.Thread):
@@ -106,7 +106,7 @@ class StorySchedulerThread(threading.Thread):
         # Import from storyTasks
         from controllers.story_controller import (
             get_story_files, get_next_story_batch, upload_story,
-            is_story_upload_successful, log_error_to_file
+            is_story_upload_successful
         )
         from ui.main_window import (
             check_internet_connection, is_rate_limit_error,

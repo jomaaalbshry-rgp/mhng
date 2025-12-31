@@ -12,13 +12,12 @@ import os
 import concurrent.futures
 from pathlib import Path
 
-from core import NotificationSystem
+from core import NotificationSystem, log_error_to_file
 from core.constants import (
     VIDEO_EXTENSIONS, INTERNET_CHECK_INTERVAL, 
     INTERNET_CHECK_MAX_ATTEMPTS, UPLOADED_FOLDER_NAME
 )
 from ui.signals import UiSignals
-from controllers.story_controller import log_error_to_file
 
 
 class SchedulerThread(threading.Thread):
@@ -102,7 +101,6 @@ class SchedulerThread(threading.Thread):
                 f'خطأ غير متوقع في عملية الرفع: {str(e)[:100]}', job.page_name)
             try:
                 # تسجيل الخطأ في ملف السجلات
-                from controllers.story_controller import log_error_to_file
                 log_error_to_file(e, f'Unexpected error in video upload for job: {job.page_name}')
             except Exception:
                 pass  # تجاهل أخطاء التسجيل
