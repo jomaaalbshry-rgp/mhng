@@ -34,10 +34,16 @@ from .helpers import (
 def __getattr__(name):
     """Lazy loading for MainWindow to avoid circular import"""
     if name == 'MainWindow':
-        from .main_window import MainWindow
-        # Cache the import in module globals to avoid repeated imports
-        globals()['MainWindow'] = MainWindow
-        return MainWindow
+        try:
+            from .main_window import MainWindow
+            # Cache the import in module globals to avoid repeated imports
+            globals()['MainWindow'] = MainWindow
+            return MainWindow
+        except ImportError as e:
+            # Log import error and re-raise with context
+            import sys
+            print(f"Failed to import MainWindow: {e}", file=sys.stderr)
+            raise
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 __all__ = [
