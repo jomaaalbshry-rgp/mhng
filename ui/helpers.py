@@ -3,9 +3,14 @@ UI Helper Functions for Page Management Application
 
 This module provides utility functions for creating UI elements,
 managing icons, and other UI-related helper functions.
+
+Functions added in Phase 6:
+- Formatting functions (format_remaining_time, format_time_12h, etc.)
+- Token utility (mask_token)
 """
 
 import os
+from datetime import datetime, timedelta
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont, QAction
 from PySide6.QtWidgets import QPushButton
@@ -267,6 +272,129 @@ def create_icon_action(text: str, icon_key: str, parent=None, color: str = None)
     return action
 
 
+# ==================== Formatting Functions ====================
+
+def mask_token(t: str) -> str:
+    """
+    إخفاء التوكن للعرض الآمن.
+    Mask token for safe display.
+    
+    المعاملات / Args:
+        t: التوكن - Token
+    
+    العائد / Returns:
+        التوكن المخفي - Masked token
+    """
+    if not t:
+        return "(لا يوجد)"
+    if len(t) <= 12:
+        return t
+    return t[:8] + '...' + t[-4:]
+
+
+def seconds_to_value_unit(secs: int) -> tuple:
+    """
+    تحويل الثواني إلى قيمة ووحدة مناسبة.
+    Convert seconds to appropriate value and unit.
+    
+    المعاملات / Args:
+        secs: عدد الثواني - Number of seconds
+    
+    العائد / Returns:
+        tuple: (القيمة، الوحدة) - (value, unit)
+    """
+    if secs < 60:
+        return (secs, 'ثانية')
+    elif secs < 3600:
+        return (secs // 60, 'دقيقة')
+    elif secs < 86400:
+        return (secs // 3600, 'ساعة')
+    else:
+        return (secs // 86400, 'يوم')
+
+
+def format_remaining_time(seconds: int) -> str:
+    """
+    تنسيق الوقت المتبقي بشكل قابل للقراءة.
+    Format remaining time in a readable format.
+    
+    المعاملات / Args:
+        seconds: عدد الثواني - Number of seconds
+    
+    العائد / Returns:
+        نص منسق - Formatted text
+    """
+    if seconds < 0:
+        return 'منتهي'
+    
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    
+    parts = []
+    if days > 0:
+        parts.append(f'{days}ي')
+    if hours > 0:
+        parts.append(f'{hours}س')
+    if minutes > 0:
+        parts.append(f'{minutes}د')
+    if secs > 0 and days == 0:  # Only show seconds if less than a day
+        parts.append(f'{secs}ث')
+    
+    return ' '.join(parts) if parts else '0ث'
+
+
+def format_time_12h(time_str: str = None) -> str:
+    """
+    تحويل الوقت إلى صيغة 12 ساعة مع AM/PM.
+    Convert time to 12-hour format with AM/PM.
+    
+    المعاملات / Args:
+        time_str: وقت بصيغة 24 ساعة (HH:MM) أو None للوقت الحالي
+                 Time in 24-hour format (HH:MM) or None for current time
+    
+    العائد / Returns:
+        وقت بصيغة 12 ساعة - Time in 12-hour format
+    """
+    try:
+        if time_str:
+            # تحليل الوقت المعطى
+            time_obj = datetime.strptime(time_str, '%H:%M').time()
+        else:
+            # استخدام الوقت الحالي
+            time_obj = datetime.now().time()
+        
+        hour = time_obj.hour
+        minute = time_obj.minute
+        
+        # تحديد AM أو PM
+        period = 'ص' if hour < 12 else 'م'  # ص للصباح، م للمساء
+        
+        # تحويل إلى صيغة 12 ساعة
+        hour_12 = hour % 12
+        if hour_12 == 0:
+            hour_12 = 12
+        
+        return f'{hour_12:02d}:{minute:02d} {period}'
+    except Exception:
+        return time_str or ''
+
+
+def format_datetime_12h() -> str:
+    """
+    تنسيق التاريخ والوقت الحالي بصيغة 12 ساعة.
+    Format current date and time in 12-hour format.
+    
+    العائد / Returns:
+        نص منسق - Formatted text
+    """
+    now = datetime.now()
+    date_str = now.strftime('%Y-%m-%d')
+    time_str = format_time_12h()
+    return f'{date_str} {time_str}'
+
+
 __all__ = [
     'create_fallback_icon',
     'load_app_icon',
@@ -276,4 +404,10 @@ __all__ = [
     'ICONS',
     'ICON_COLORS',
     'HAS_QTAWESOME',
+    # Formatting functions
+    'mask_token',
+    'seconds_to_value_unit',
+    'format_remaining_time',
+    'format_time_12h',
+    'format_datetime_12h',
 ]

@@ -31,10 +31,17 @@ from core import get_logger, log_info, log_error, log_warning, log_debug
 import requests
 
 # استيراد وحدات قاعدة البيانات والتشفير الآمن
-# Note: DatabaseManager and get_database_manager are imported for future refactoring
-# when all direct sqlite3.connect() calls will be replaced with the unified manager.
-# Currently, simple_encrypt/simple_decrypt use secure_encrypt/secure_decrypt.
 from services import DatabaseManager, get_database_manager, initialize_database
+# استيراد وحدة الوصول إلى البيانات - Import data access module
+from services import (
+    get_settings_file, get_jobs_file, get_database_file, migrate_old_files,
+    save_hashtag_group, get_hashtag_groups, delete_hashtag_group,
+    is_within_working_hours, calculate_time_to_working_hours_start,
+    log_upload, get_upload_stats, reset_upload_stats, generate_text_chart,
+    init_default_templates, ensure_default_templates,
+    get_all_templates, get_template_by_id, save_template, delete_template,
+    get_default_template, set_default_template, get_schedule_times_for_template
+)
 from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_decrypt
 
 # استيراد الوحدات المنفصلة للفيديو والستوري والريلز
@@ -86,7 +93,10 @@ from ui.dialogs import HashtagManagerDialog as HashtagManagerDialogBase
 from ui.helpers import (
     create_fallback_icon, load_app_icon, get_icon,
     create_icon_button, create_icon_action,
-    ICONS, ICON_COLORS, HAS_QTAWESOME
+    ICONS, ICON_COLORS, HAS_QTAWESOME,
+    # Import formatting functions
+    mask_token, seconds_to_value_unit, format_remaining_time,
+    format_time_12h, format_datetime_12h
 )
 from ui.components import JobsTable, LogViewer, LogLevel, ProgressWidget
 
@@ -140,68 +150,8 @@ except Exception:
 
 # APP_TITLE and APP_DATA_FOLDER have been moved to core/constants.py
 
-
-def _get_appdata_folder() -> Path:
-    """
-    الحصول على مسار مجلد AppData للتطبيق.
-
-    العائد:
-        مسار المجلد في AppData/Roaming (ويندوز) أو ~/.config (لينكس/ماك)
-    """
-    if sys.platform == 'win32':
-        appdata = os.environ.get('APPDATA', '')
-        if appdata:
-            return Path(appdata) / APP_DATA_FOLDER
-    # Fallback لأنظمة أخرى
-    home = Path.home()
-    return home / '.config' / APP_DATA_FOLDER
-
-
-def _get_settings_file() -> Path:
-    """الحصول على مسار ملف الإعدادات في AppData."""
-    folder = _get_appdata_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / "fb_scheduler_settings.json"
-
-
-def _get_jobs_file() -> Path:
-    """الحصول على مسار ملف الوظائف في AppData."""
-    folder = _get_appdata_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / "fb_scheduler_jobs.json"
-
-
-def _migrate_old_files():
-    """
-    ترحيل الملفات القديمة (بجانب exe/السكربت) إلى AppData.
-
-    يتم نسخ الملفات مرة واحدة فقط إذا كانت موجودة في الموقع القديم
-    ولم تكن موجودة في الموقع الجديد.
-    """
-    script_dir = Path(__file__).parent.resolve()
-    old_settings = script_dir / "fb_scheduler_settings.json"
-    old_jobs = script_dir / "fb_scheduler_jobs.json"
-
-    new_settings = _get_settings_file()
-    new_jobs = _get_jobs_file()
-
-    # ترحيل ملف الإعدادات
-    if old_settings.exists() and not new_settings.exists():
-        try:
-            shutil.copy2(old_settings, new_settings)
-        except Exception:
-            pass
-
-    # ترحيل ملف الوظائف
-    if old_jobs.exists() and not new_jobs.exists():
-        try:
-            shutil.copy2(old_jobs, new_jobs)
-        except Exception:
-            pass
-
-
-# تنفيذ الترحيل عند تحميل الوحدة
-_migrate_old_files()
+# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
+migrate_old_files()
 
 # ==================== Constants ====================
 # All constants have been moved to core/constants.py
@@ -209,160 +159,17 @@ _migrate_old_files()
 
 
 # ==================== SQLite Database ====================
-
-def _get_database_file() -> Path:
-    """الحصول على مسار قاعدة بيانات SQLite."""
-    folder = _get_appdata_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / "page_management.db"
-
-
-def init_database():
-    """
-    تهيئة قاعدة بيانات SQLite وإنشاء الجداول اللازمة.
-    """
-    db_path = _get_database_file()
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    # جدول الوظائف
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS jobs (
-            page_id TEXT PRIMARY KEY,
-            page_name TEXT,
-            folder TEXT,
-            interval_seconds INTEGER,
-            page_access_token TEXT,
-            next_index INTEGER DEFAULT 0,
-            title_template TEXT,
-            description_template TEXT,
-            chunk_size INTEGER,
-            use_filename_as_title INTEGER DEFAULT 0,
-            enabled INTEGER DEFAULT 1,
-            is_scheduled INTEGER DEFAULT 0,
-            next_run_timestamp REAL,
-            job_type TEXT DEFAULT 'video',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول مهام الستوري
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS story_jobs (
-            page_id TEXT PRIMARY KEY,
-            page_name TEXT,
-            folder TEXT,
-            interval_seconds INTEGER,
-            page_access_token TEXT,
-            next_index INTEGER DEFAULT 0,
-            stories_per_schedule INTEGER DEFAULT 10,
-            sort_by TEXT DEFAULT 'name',
-            enabled INTEGER DEFAULT 1,
-            is_scheduled INTEGER DEFAULT 0,
-            next_run_timestamp REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول الإعدادات
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-
-    # جدول سجل الرفع
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS upload_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            page_id TEXT,
-            page_name TEXT,
-            file_path TEXT,
-            file_name TEXT,
-            upload_type TEXT DEFAULT 'video',
-            video_id TEXT,
-            video_url TEXT,
-            status TEXT,
-            error_message TEXT,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول مجموعات الهاشتاجات
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hashtag_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            hashtags TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول ساعات العمل
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS working_hours (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            page_id TEXT,
-            start_time TEXT DEFAULT '09:00',
-            end_time TEXT DEFAULT '23:00',
-            enabled INTEGER DEFAULT 0,
-            apply_globally INTEGER DEFAULT 0
-        )
-    ''')
-
-    # جدول إعدادات العلامة المائية
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS watermark_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            page_id TEXT,
-            logo_path TEXT,
-            position TEXT DEFAULT 'bottom_right',
-            opacity REAL DEFAULT 0.8,
-            enabled INTEGER DEFAULT 0
-        )
-    ''')
-
-    # جدول قوالب الجداول الذكية (النظام الجديد)
-    # [DB] تم تحديث القيمة الافتراضية لـ days لاستخدام صيغة نصية للتوافق مع database_manager.py
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS schedule_templates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            times TEXT NOT NULL,
-            days TEXT DEFAULT '["sat", "sun", "mon", "tue", "wed", "thu", "fri"]',
-            random_offset INTEGER DEFAULT 15,
-            is_default BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول التطبيقات والتوكينات (نظام إدارة التوكينات الجديد)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS app_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_name TEXT NOT NULL,
-            app_id TEXT NOT NULL,
-            app_secret TEXT,
-            short_lived_token TEXT,
-            long_lived_token TEXT,
-            token_expires_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
+# Database path and init functions moved to services/data_access.py
+# Note: init_database() is imported from services above
 
 def migrate_json_to_sqlite():
     """
     ترحيل البيانات من ملفات JSON إلى SQLite عند أول تشغيل.
+    Migrate data from JSON files to SQLite on first run.
     """
-    db_path = _get_database_file()
-    jobs_file = _get_jobs_file()
-    settings_file = _get_settings_file()
+    db_path = get_database_file()
+    jobs_file = get_jobs_file()
+    settings_file = get_settings_file()
 
     # التحقق من وجود بيانات للترحيل
     if not jobs_file.exists() and not settings_file.exists():
@@ -441,7 +248,7 @@ def get_all_app_tokens() -> list:
         قائمة من القواميس تحتوي على بيانات التطبيقات
         List of dictionaries containing app data
     """
-    return FacebookAPIService.get_all_app_tokens(_get_database_file(), simple_decrypt)
+    return FacebookAPIService.get_all_app_tokens(get_database_file(), simple_decrypt)
 
 
 def save_app_token(app_name: str, app_id: str, app_secret: str = '',
@@ -465,7 +272,7 @@ def save_app_token(app_name: str, app_id: str, app_secret: str = '',
         tuple: (success: bool, record ID: int or None)
     """
     return FacebookAPIService.save_app_token(
-        _get_database_file(), simple_encrypt, app_name, app_id, app_secret,
+        get_database_file(), simple_encrypt, app_name, app_id, app_secret,
         short_lived_token, long_lived_token, token_expires_at, token_id
     )
 
@@ -481,7 +288,7 @@ def delete_app_token(token_id: int) -> bool:
     العائد:
         True إذا نجح الحذف - True if deletion successful
     """
-    return FacebookAPIService.delete_app_token(_get_database_file(), token_id)
+    return FacebookAPIService.delete_app_token(get_database_file(), token_id)
 
 
 def exchange_token_for_long_lived(app_id: str, app_secret: str,
@@ -518,43 +325,6 @@ def get_all_long_lived_tokens() -> list:
 # They are imported above from core
 
 
-def log_upload(page_id: str, page_name: str, file_path: str, file_name: str,
-               upload_type: str, video_id: str = None, video_url: str = None,
-               status: str = 'success', error_message: str = None):
-    """تسجيل عملية رفع في قاعدة البيانات وإرسال إشعار Telegram."""
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO upload_history
-            (page_id, page_name, file_path, file_name, upload_type, video_id, video_url, status, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (page_id, page_name, file_path, file_name, upload_type, video_id, video_url, status, error_message))
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
-    # إرسال إشعار Telegram
-    try:
-        if telegram_notifier.enabled and telegram_notifier.is_configured():
-            # إرسال الإشعار في خيط منفصل لتجنب التأخير
-            def send_notification():
-                try:
-                    telegram_notifier.send_upload_notification(
-                        status=status,
-                        page_name=page_name,
-                        file_name=file_name,
-                        video_url=video_url,
-                        error_msg=error_message
-                    )
-                except Exception:
-                    pass  # تجاهل أخطاء الإشعارات
-            threading.Thread(target=send_notification, daemon=True).start()
-    except Exception:
-        pass  # تجاهل أخطاء الإشعارات
-
-
 def send_telegram_error(error_type: str, message: str, job_name: str = None):
     """
     إرسال إشعار خطأ عبر Telegram.
@@ -580,712 +350,14 @@ def send_telegram_error(error_type: str, message: str, job_name: str = None):
         pass  # تجاهل أخطاء الإشعارات
 
 
-def get_upload_stats(page_id: str = None, days: int = 30) -> dict:
-    """الحصول على إحصائيات الرفع."""
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-
-        # استخدام استعلامات معلّمة بالكامل
-        if page_id:
-            # استعلام مع تصفية حسب page_id
-            cursor.execute('''
-                SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successful,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-                FROM upload_history
-                WHERE uploaded_at >= datetime('now', ?) AND page_id = ?
-            ''', (f'-{days} days', page_id))
-        else:
-            # استعلام بدون تصفية حسب page_id
-            cursor.execute('''
-                SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successful,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-                FROM upload_history
-                WHERE uploaded_at >= datetime('now', ?)
-            ''', (f'-{days} days',))
-
-        row = cursor.fetchone()
-        total = row[0] or 0
-        successful = row[1] or 0
-        failed = row[2] or 0
-
-        # حساب معدل النجاح
-        success_rate = (successful / total * 100) if total > 0 else 0
-
-        # الإحصائيات الأسبوعية
-        weekly_stats = {}
-        days_ar = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
-
-        if page_id:
-            cursor.execute('''
-                SELECT strftime('%w', uploaded_at) as day_num, COUNT(*) as count
-                FROM upload_history
-                WHERE uploaded_at >= datetime('now', '-7 days') AND page_id = ?
-                GROUP BY day_num
-            ''', (page_id,))
-        else:
-            cursor.execute('''
-                SELECT strftime('%w', uploaded_at) as day_num, COUNT(*) as count
-                FROM upload_history
-                WHERE uploaded_at >= datetime('now', '-7 days')
-                GROUP BY day_num
-            ''')
-
-        for row in cursor.fetchall():
-            day_num = int(row[0])
-            # تحويل رقم اليوم من SQLite (0=الأحد، 1=الإثنين، ..., 6=السبت)
-            # إلى فهرس القائمة العربية (0=السبت، 1=الأحد، ..., 6=الجمعة)
-            # المعادلة: (day_num + 1) % 7 تحول 0(الأحد) إلى 1، و6(السبت) إلى 0
-            day_index = (day_num + 1) % 7
-            weekly_stats[days_ar[day_index]] = row[1]
-
-        # التأكد من وجود جميع الأيام
-        for day in days_ar:
-            if day not in weekly_stats:
-                weekly_stats[day] = 0
-
-        # آخر الرفع
-        if page_id:
-            cursor.execute('''
-                SELECT file_name, page_name, video_url, uploaded_at, status
-                FROM upload_history
-                WHERE uploaded_at >= datetime('now', ?) AND page_id = ?
-                ORDER BY uploaded_at DESC LIMIT 20
-            ''', (f'-{days} days', page_id))
-        else:
-            cursor.execute('''
-                SELECT file_name, page_name, video_url, uploaded_at, status
-                FROM upload_history
-                WHERE uploaded_at >= datetime('now', ?)
-                ORDER BY uploaded_at DESC LIMIT 20
-            ''', (f'-{days} days',))
-
-        recent = cursor.fetchall()
-
-        conn.close()
-
-        return {
-            'total': total,
-            'successful': successful,
-            'failed': failed,
-            'success_rate': success_rate,
-            'weekly_stats': weekly_stats,
-            'recent': recent
-        }
-    except Exception:
-        return {'total': 0, 'successful': 0, 'failed': 0, 'success_rate': 0, 'weekly_stats': {}, 'recent': []}
-
-
-def reset_upload_stats():
-    """تصفير إحصائيات الرفع - حذف جميع السجلات من قاعدة البيانات."""
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM upload_history')
-        conn.commit()
-        conn.close()
-        return True
-    except Exception:
-        return False
-
-
-def generate_text_chart(data: dict) -> str:
-    """
-    إنشاء رسم بياني نصي من البيانات الأسبوعية.
-
-    Args:
-        data: قاموس يحتوي على أيام الأسبوع وعدد الرفع لكل يوم
-
-    Returns:
-        نص يمثل الرسم البياني
-    """
-    days = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
-
-    # التحقق من وجود بيانات وحساب القيمة القصوى بأمان
-    if not data:
-        max_val = 1
-    else:
-        values = list(data.values())
-        max_val = max(values) if values else 1
-
-    chart = ""
-    for day in days:
-        count = data.get(day, 0)
-        bar_len = int((count / max_val) * 20) if max_val > 0 else 0
-        bar = '█' * bar_len + '░' * (20 - bar_len)
-        chart += f"{day:>10}: {bar} {count}\n"
-    return chart
-
-
 # ==================== Hashtag Manager ====================
-
-def save_hashtag_group(name: str, hashtags: str):
-    """حفظ مجموعة هاشتاجات."""
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO hashtag_groups (name, hashtags)
-            VALUES (?, ?)
-        ''', (name, hashtags))
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
-
-def get_hashtag_groups() -> list:
-    """الحصول على جميع مجموعات الهاشتاجات."""
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('SELECT name, hashtags FROM hashtag_groups ORDER BY name')
-        groups = cursor.fetchall()
-        conn.close()
-        return groups
-    except Exception:
-        return []
-
-
-def delete_hashtag_group(name: str):
-    """حذف مجموعة هاشتاجات."""
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM hashtag_groups WHERE name = ?', (name,))
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
 
 # ==================== Working Hours (Legacy - Removed) ====================
 # تم إزالة نظام ساعات العمل واستبداله بنظام قوالب الجداول الذكية
-
-def is_within_working_hours(page_id: str = None) -> bool:
-    """
-    التحقق مما إذا كان الوقت الحالي ضمن ساعات العمل.
-
-    ملاحظة: تم إزالة نظام ساعات العمل. هذه الدالة تُرجع True دائماً للتوافقية.
-    استخدم نظام قوالب الجداول الذكية بدلاً من ذلك.
-    """
-    return True  # السماح دائماً - تم إزالة نظام ساعات العمل
-
+# Functions moved to services/data_access.py
 
 # ==================== نظام قوالب الجداول الذكية ====================
-
-# [DB] قائمة أيام الأسبوع بصيغة نصية للتوافق مع database_manager.py
-ALL_WEEKDAYS_STR = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"]
-
-# القوالب الافتراضية مع إيموجي
-# [DB] تم تحديث الأيام لاستخدام صيغة نصية للتوافق مع database_manager.py
-DEFAULT_TEMPLATES = [
-    {
-        'name': '⭐ الافتراضي',
-        'times': ['08:00', '12:00', '18:00', '22:00'],
-        'days': ALL_WEEKDAYS_STR,
-        'is_default': True
-    },
-    {
-        'name': '🌅 صباحي',
-        'times': ['06:00', '07:00', '08:00', '09:00'],
-        'days': ALL_WEEKDAYS_STR,
-        'is_default': False
-    },
-    {
-        'name': '🌙 ليلي',
-        'times': ['20:00', '22:00', '00:00'],
-        'days': ALL_WEEKDAYS_STR,
-        'is_default': False
-    },
-    {
-        'name': '📱 مكثف',
-        'times': ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'],
-        'days': ALL_WEEKDAYS_STR,
-        'is_default': False
-    }
-]
-
-
-def _parse_days_from_db(days_raw: str) -> list:
-    """
-    Parse days value from database, handling both numeric and string formats.
-
-    Args:
-        days_raw: Raw days value from database (JSON string or None)
-
-    Returns:
-        List of day strings (e.g., ["sat", "sun", "mon", ...])
-    """
-    if not days_raw:
-        return ALL_WEEKDAYS_STR
-
-    try:
-        days = json.loads(days_raw)
-        # If parsed successfully, return as-is (could be strings or numbers)
-        return days if days else ALL_WEEKDAYS_STR
-    except json.JSONDecodeError:
-        return ALL_WEEKDAYS_STR
-
-
-def _ensure_schedule_templates_table(cursor):
-    """
-    التأكد من وجود جدول القوالب (دالة مساعدة لتجنب التكرار).
-
-    المعاملات:
-        cursor: مؤشر قاعدة البيانات SQLite
-
-    العائد:
-        True إذا نجح الإنشاء أو كان الجدول موجوداً مسبقاً
-
-    الاستثناءات:
-        يرمي الاستثناء للأعلى في حالة فشل الإنشاء
-    """
-    try:
-        # [DB] تم تحديث القيمة الافتراضية لـ days لاستخدام صيغة نصية للتوافق مع database_manager.py
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS schedule_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                times TEXT NOT NULL,
-                days TEXT DEFAULT '["sat", "sun", "mon", "tue", "wed", "thu", "fri"]',
-                random_offset INTEGER DEFAULT 15,
-                is_default BOOLEAN DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-    except sqlite3.Error as e:
-        log_error(f'فشل إنشاء جدول schedule_templates: {e}')
-        log_error(f'[DB] Error details: table schedule_templates has no column named days - check migration')
-        raise
-
-
-def init_default_templates():
-    """
-    إنشاء القوالب الافتراضية إذا لم تكن موجودة.
-
-    تقوم هذه الدالة بإنشاء جدول القوالب إذا لم يكن موجوداً،
-    ثم تضيف القوالب الافتراضية إذا كان الجدول فارغاً.
-
-    العائد:
-        True إذا نجحت العملية، False خلاف ذلك
-    """
-    try:
-        log_debug('بدء تهيئة القوالب الافتراضية...')
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-
-        # التأكد من وجود الجدول
-        _ensure_schedule_templates_table(cursor)
-        conn.commit()
-
-        # التحقق من وجود قوالب
-        cursor.execute('SELECT COUNT(*) FROM schedule_templates')
-        count = cursor.fetchone()[0]
-
-        if count == 0:
-            log_info('لا توجد قوالب - جاري إضافة القوالب الافتراضية...')
-            # إضافة القوالب الافتراضية
-            for template in DEFAULT_TEMPLATES:
-                try:
-                    cursor.execute('''
-                        INSERT INTO schedule_templates (name, times, days, is_default)
-                        VALUES (?, ?, ?, ?)
-                    ''', (
-                        template['name'],
-                        json.dumps(template['times']),
-                        json.dumps(template['days']),
-                        1 if template['is_default'] else 0
-                    ))
-                    log_debug(f'تم إضافة قالب: {template["name"]}')
-                except sqlite3.IntegrityError:
-                    # القالب موجود بالفعل - تخطي
-                    log_debug(f'القالب موجود مسبقاً: {template["name"]}')
-                    continue
-            log_info(f'تم إضافة {len(DEFAULT_TEMPLATES)} قوالب افتراضية')
-        else:
-            log_debug(f'توجد {count} قوالب محفوظة مسبقاً')
-
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        log_error(f'فشل تهيئة القوالب الافتراضية: {e}')
-        return False
-
-
-def ensure_default_templates():
-    """
-    ضمان وجود القوالب الافتراضية في قاعدة البيانات.
-
-    تستخدم هذه الدالة للتأكد من أن القوالب الافتراضية موجودة
-    بعد الترقية أو إعادة التثبيت. تضيف القوالب المفقودة فقط
-    دون التأثير على القوالب الموجودة.
-
-    العائد:
-        عدد القوالب المضافة
-    """
-    added_count = 0
-    try:
-        log_debug('التحقق من وجود القوالب الافتراضية...')
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-
-        # التأكد من وجود الجدول
-        _ensure_schedule_templates_table(cursor)
-        conn.commit()
-
-        # الحصول على أسماء القوالب الموجودة
-        cursor.execute('SELECT name FROM schedule_templates')
-        existing_names = {row[0] for row in cursor.fetchall()}
-
-        # إضافة القوالب المفقودة فقط
-        for template in DEFAULT_TEMPLATES:
-            if template['name'] not in existing_names:
-                try:
-                    cursor.execute('''
-                        INSERT INTO schedule_templates (name, times, days, is_default)
-                        VALUES (?, ?, ?, ?)
-                    ''', (
-                        template['name'],
-                        json.dumps(template['times']),
-                        json.dumps(template['days']),
-                        1 if template['is_default'] else 0
-                    ))
-                    added_count += 1
-                    log_info(f'تم إضافة قالب مفقود: {template["name"]}')
-                except sqlite3.IntegrityError:
-                    # القالب موجود بالفعل (ربما تم إضافته بين الاستعلامين)
-                    continue
-
-        conn.commit()
-        conn.close()
-
-        if added_count > 0:
-            log_info(f'تم إضافة {added_count} قوالب افتراضية مفقودة')
-
-        return added_count
-    except Exception as e:
-        log_error(f'فشل ضمان وجود القوالب الافتراضية: {e}')
-        return 0
-
-
-def get_all_templates() -> list:
-    """
-    الحصول على جميع قوالب الجداول.
-
-    العائد:
-        قائمة من القواميس تحتوي على بيانات القوالب
-    """
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, name, times, days, random_offset, is_default, created_at
-            FROM schedule_templates
-            ORDER BY is_default DESC, name
-        ''')
-        rows = cursor.fetchall()
-        conn.close()
-
-        templates = []
-        for row in rows:
-            templates.append({
-                'id': row[0],
-                'name': row[1],
-                'times': json.loads(row[2]) if row[2] else [],
-                'days': _parse_days_from_db(row[3]),
-                'random_offset': row[4] or 15,
-                'is_default': bool(row[5]),
-                'created_at': row[6]
-            })
-        return templates
-    except sqlite3.Error as e:
-        log_error(f'[DB] خطأ في قاعدة البيانات عند جلب القوالب: {e}')
-        if "no column named days" in str(e).lower():
-            log_error(f'[DB] The days column is missing. Run database migrations first.')
-        return []
-    except Exception as e:
-        log_error(f'[DB] خطأ غير متوقع عند جلب القوالب: {e}')
-        return []
-
-
-def get_template_by_id(template_id: int) -> dict:
-    """
-    الحصول على قالب بالمعرف.
-
-    المعاملات:
-        template_id: معرف القالب
-
-    العائد:
-        بيانات القالب أو None
-    """
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, name, times, days, random_offset, is_default
-            FROM schedule_templates
-            WHERE id = ?
-        ''', (template_id,))
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            return {
-                'id': row[0],
-                'name': row[1],
-                'times': json.loads(row[2]) if row[2] else [],
-                'days': _parse_days_from_db(row[3]),
-                'random_offset': row[4] or 15,
-                'is_default': bool(row[5])
-            }
-        return None
-    except sqlite3.Error as e:
-        log_error(f'[DB] خطأ في قاعدة البيانات عند جلب القالب {template_id}: {e}')
-        if "no column named days" in str(e).lower():
-            log_error(f'[DB] The days column is missing. Run database migrations first.')
-        return None
-    except Exception as e:
-        log_error(f'[DB] خطأ غير متوقع عند جلب القالب {template_id}: {e}')
-        return None
-
-
-def save_template(name: str, times: list, days: list = None, random_offset: int = 15, template_id: int = None) -> tuple:
-    """
-    حفظ قالب جديد أو تحديث موجود.
-
-    المعاملات:
-        name: اسم القالب
-        times: قائمة الأوقات (مثل ["08:00", "12:00"])
-        days: قائمة الأيام (مثل ["sat", "sun", "mon", "tue", "wed", "thu", "fri"])
-        random_offset: التوزيع العشوائي بالدقائق
-        template_id: معرف القالب للتحديث (None لإنشاء جديد)
-
-    العائد:
-        tuple: (نجاح: bool, رسالة: str)
-        - (True, None) إذا نجح الحفظ
-        - (False, 'validation_error') إذا كانت المدخلات غير صالحة
-        - (False, 'duplicate_name') إذا كان الاسم مستخدماً مسبقاً
-        - (False, 'database_error') إذا حدث خطأ في قاعدة البيانات
-        - (False, 'table_error') إذا فشل إنشاء الجدول
-    """
-    # التحقق من صحة المدخلات
-    if not name or not name.strip():
-        log_warning('محاولة حفظ قالب بدون اسم')
-        return (False, 'validation_error')
-    if not times or len(times) == 0:
-        log_warning('محاولة حفظ قالب بدون أوقات')
-        return (False, 'validation_error')
-
-    # [DB] استخدام صيغة الأيام النصية للتوافق مع database_manager.py
-    if days is None:
-        days = ALL_WEEKDAYS_STR
-
-    conn = None
-    try:
-        log_debug(f'جاري حفظ القالب: {name}')
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-
-        # التأكد من وجود الجدول
-        try:
-            _ensure_schedule_templates_table(cursor)
-            conn.commit()
-        except sqlite3.Error as e:
-            log_error(f'فشل إنشاء جدول القوالب: {e}')
-            return (False, 'table_error')
-
-        if template_id is not None:
-            # تحديث قالب موجود
-            log_debug(f'تحديث القالب #{template_id}')
-
-            # التحقق من عدم وجود قالب آخر بنفس الاسم (باستثناء القالب الحالي)
-            cursor.execute(
-                'SELECT id FROM schedule_templates WHERE name = ? AND id != ?',
-                (name.strip(), template_id)
-            )
-            if cursor.fetchone():
-                log_warning(f'الاسم مستخدم مسبقاً بواسطة قالب آخر: {name}')
-                return (False, 'duplicate_name')
-
-            cursor.execute('''
-                UPDATE schedule_templates
-                SET name = ?, times = ?, days = ?, random_offset = ?
-                WHERE id = ?
-            ''', (name.strip(), json.dumps(times, ensure_ascii=False), json.dumps(days), random_offset, template_id))
-
-            if cursor.rowcount == 0:
-                log_warning(f'لم يتم العثور على القالب #{template_id} للتحديث')
-                return (False, 'not_found')
-        else:
-            # إنشاء قالب جديد
-            log_debug(f'إنشاء قالب جديد: {name}')
-
-            # التحقق من عدم وجود قالب بنفس الاسم
-            cursor.execute(
-                'SELECT id FROM schedule_templates WHERE name = ?',
-                (name.strip(),)
-            )
-            if cursor.fetchone():
-                log_warning(f'الاسم مستخدم مسبقاً: {name}')
-                return (False, 'duplicate_name')
-
-            try:
-                cursor.execute('''
-                    INSERT INTO schedule_templates (name, times, days, random_offset)
-                    VALUES (?, ?, ?, ?)
-                ''', (name.strip(), json.dumps(times, ensure_ascii=False), json.dumps(days), random_offset))
-            except sqlite3.IntegrityError as e:
-                error_str = str(e).lower()
-                # التمييز بين أنواع أخطاء التكامل
-                if 'unique constraint' in error_str or 'unique' in error_str:
-                    log_warning(f'الاسم مستخدم مسبقاً: {name}')
-                    return (False, 'duplicate_name')
-                elif 'not null constraint' in error_str:
-                    log_error(f'خطأ: حقل مطلوب مفقود في جدول القوالب - {e}')
-                    send_telegram_error('خطأ في قاعدة البيانات', f'حقل مطلوب مفقود في جدول القوالب: {e}')
-                    return (False, 'database_error')
-                else:
-                    log_error(f'خطأ في قاعدة البيانات: {e}')
-                    send_telegram_error('خطأ في قاعدة البيانات', f'خطأ في حفظ القالب: {e}')
-                    return (False, 'database_error')
-
-        conn.commit()
-        log_info(f'تم حفظ القالب بنجاح: {name}')
-        return (True, None)
-
-    except sqlite3.Error as e:
-        log_error(f'خطأ في قاعدة البيانات عند حفظ القالب: {e}')
-        if "no column named days" in str(e).lower():
-            log_error(f'[DB] The days column is missing. Run database migrations first.')
-        send_telegram_error('خطأ في قاعدة البيانات', f'خطأ عند حفظ القالب "{name}": {e}')
-        return (False, 'database_error')
-    except Exception as e:
-        log_error(f'خطأ غير متوقع عند حفظ القالب: {e}')
-        send_telegram_error('خطأ غير متوقع', f'خطأ عند حفظ القالب "{name}": {e}')
-        return (False, 'unexpected_error')
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-
-def delete_template(template_id: int) -> bool:
-    """
-    حذف قالب.
-
-    المعاملات:
-        template_id: معرف القالب
-
-    العائد:
-        True إذا نجح الحذف
-    """
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        # لا يمكن حذف القالب الافتراضي
-        cursor.execute('SELECT is_default FROM schedule_templates WHERE id = ?', (template_id,))
-        row = cursor.fetchone()
-        if row and row[0]:
-            conn.close()
-            return False  # لا يمكن حذف القالب الافتراضي
-
-        cursor.execute('DELETE FROM schedule_templates WHERE id = ?', (template_id,))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception:
-        return False
-
-
-def get_default_template() -> dict:
-    """
-    الحصول على القالب الافتراضي.
-
-    العائد:
-        بيانات القالب الافتراضي
-    """
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, name, times, days, random_offset, is_default
-            FROM schedule_templates
-            WHERE is_default = 1
-            LIMIT 1
-        ''')
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            return {
-                'id': row[0],
-                'name': row[1],
-                'times': json.loads(row[2]) if row[2] else [],
-                'days': json.loads(row[3]) if row[3] else [0, 1, 2, 3, 4, 5, 6],
-                'random_offset': row[4] or 15,
-                'is_default': bool(row[5])
-            }
-        # إذا لم يوجد قالب افتراضي، أنشئ القوالب الافتراضية
-        init_default_templates()
-        return get_default_template()
-    except Exception:
-        return {'id': 0, 'name': 'الافتراضي', 'times': ['08:00', '12:00', '18:00', '22:00'],
-                'days': [0, 1, 2, 3, 4, 5, 6], 'random_offset': 15, 'is_default': True}
-
-
-def set_default_template(template_id: int) -> bool:
-    """
-    تعيين قالب كافتراضي.
-
-    المعاملات:
-        template_id: معرف القالب
-
-    العائد:
-        True إذا نجح التعيين
-    """
-    try:
-        conn = sqlite3.connect(str(_get_database_file()))
-        cursor = conn.cursor()
-
-        # إزالة علامة الافتراضي من جميع القوالب
-        cursor.execute('UPDATE schedule_templates SET is_default = 0')
-
-        # تعيين القالب المحدد كافتراضي
-        cursor.execute('UPDATE schedule_templates SET is_default = 1 WHERE id = ?', (template_id,))
-
-        conn.commit()
-        conn.close()
-        return True
-    except Exception:
-        return False
-
-
-def get_schedule_times_for_template(template_id: int = None) -> list:
-    """
-    الحصول على أوقات الجدولة من القالب.
-
-    المعاملات:
-        template_id: معرف القالب (None للحصول على القالب الافتراضي)
-
-    العائد:
-        قائمة الأوقات
-    """
-    if template_id:
-        template = get_template_by_id(template_id)
-    else:
-        template = get_default_template()
-
-    if template:
-        return template.get('times', [])
-    return ['08:00', '12:00', '18:00', '22:00']
+# Template management functions moved to services/data_access.py
 
 
 # ==================== Internet Connectivity Check ====================
@@ -2524,124 +1596,6 @@ def get_job_key(job) -> str:
     app_name = getattr(job, 'app_name', '')
     return make_job_key(job.page_id, app_name)
 
-
-def mask_token(t):
-    if not t:
-        return "(لا يوجد)"
-    if len(t) <= 12:
-        return t
-    return t[:8] + "..." + t[-4:]
-
-
-def seconds_to_value_unit(secs: int):
-    """تحويل الثواني إلى قيمة ووحدة (ساعات أو دقائق مع تقريب لأعلى)."""
-    if secs % 3600 == 0:
-        return secs // 3600, 'ساعات'
-    # تحويل إلى دقائق (تقريب لأعلى إذا لزم الأمر)
-    minutes = (secs + 59) // 60  # تقريب لأعلى
-    return minutes, 'دقائق'
-
-
-def format_remaining_time(seconds: int) -> str:
-    """تنسيق الوقت المتبقي بصيغة HH:MM:SS."""
-    h = seconds // 3600
-    m = (seconds % 3600) // 60
-    s = seconds % 60
-    return f'{h:02d}:{m:02d}:{s:02d}'
-
-
-def format_time_12h(time_str: str = None) -> str:
-    """
-    تحويل الوقت إلى نظام 12 ساعة (صباحاً/مساءً) بناءً على توقيت الكمبيوتر المحلي.
-
-    المعاملات:
-        time_str: سلسلة الوقت بصيغة HH:MM (اختياري). إذا لم تُحدد يُستخدم الوقت الحالي.
-
-    العائد:
-        الوقت بصيغة hh:mm صباحاً/مساءً
-    """
-    if time_str:
-        try:
-            dt = datetime.strptime(time_str, '%H:%M')
-        except ValueError:
-            # في حالة خطأ في التنسيق، استخدم الوقت الحالي
-            dt = datetime.now()
-    else:
-        dt = datetime.now()
-
-    hour = dt.hour
-    minute = dt.minute
-    period = 'ص' if hour < 12 else 'م'  # ص = صباحاً، م = مساءً
-
-    if hour == 0:
-        hour = 12
-    elif hour > 12:
-        hour = hour - 12
-
-    return f'{hour:02d}:{minute:02d} {period}'
-
-
-def format_datetime_12h() -> str:
-    """
-    تنسيق التاريخ والوقت الحالي بنظام 12 ساعة.
-
-    العائد:
-        التاريخ والوقت بصيغة YYYY-MM-DD hh:mm:ss ص/م
-    """
-    now = datetime.now()
-    hour = now.hour
-    period = 'ص' if hour < 12 else 'م'  # ص = صباحاً، م = مساءً
-
-    if hour == 0:
-        hour = 12
-    elif hour > 12:
-        hour = hour - 12
-
-    return f'{now.strftime("%Y-%m-%d")} {hour:02d}:{now.minute:02d}:{now.second:02d} {period}'
-
-
-def calculate_time_to_working_hours_start(start_time: str, end_time: str) -> int:
-    """
-    حساب الوقت المتبقي لبداية ساعات العمل (Requirement 1).
-
-    المعاملات:
-        start_time: وقت بداية العمل بصيغة HH:MM
-        end_time: وقت نهاية العمل بصيغة HH:MM
-
-    العائد:
-        الوقت المتبقي بالثواني حتى بداية ساعات العمل
-    """
-    try:
-        now = datetime.now()
-        today = now.date()
-
-        start = datetime.strptime(start_time, '%H:%M').time()
-        end = datetime.strptime(end_time, '%H:%M').time()
-
-        start_datetime = datetime.combine(today, start)
-
-        # إذا كان وقت البداية بعد الآن اليوم
-        if now.time() < start:
-            return int((start_datetime - now).total_seconds())
-
-        # إذا كان وقت البداية قد مر اليوم، نحسب للغد
-        if start <= end:
-            # نفس اليوم
-            if now.time() > end:
-                # بعد وقت النهاية - البداية غداً
-                next_start = start_datetime + timedelta(days=1)
-                return int((next_start - now).total_seconds())
-        else:
-            # ساعات العمل تمتد عبر منتصف الليل
-            if now.time() > end and now.time() < start:
-                # بين نهاية أمس وبداية اليوم
-                return int((start_datetime - now).total_seconds())
-
-        # البداية غداً
-        next_start = start_datetime + timedelta(days=1)
-        return int((next_start - now).total_seconds())
-    except Exception:
-        return 0
 
 def apply_template(template_str, page_job: PageJob, filename: str, file_index: int, total_files: int):
     """
