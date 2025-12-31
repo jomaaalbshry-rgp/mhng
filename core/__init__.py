@@ -63,6 +63,7 @@ from .utils import (
     API_CALLS_PER_STORY, get_date_placeholder, apply_title_placeholders,
     get_subprocess_args, run_subprocess, create_popen
 )
+from .job_keys import make_job_key, get_job_key
 
 __all__ = [
     'SingleInstanceManager',
@@ -145,4 +146,6 @@ __all__ = [
     'get_subprocess_args',
     'run_subprocess',
     'create_popen',
+    'make_job_key',
+    'get_job_key',
 ]
