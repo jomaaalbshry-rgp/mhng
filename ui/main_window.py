@@ -47,6 +47,7 @@ from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_
 
 # استيراد الوحدات المنفصلة للفيديو والستوري والريلز
 from core import BaseJob
+from core.jobs import PageJob
 from controllers.video_controller import VideoJob, get_video_files, count_video_files
 from controllers.story_controller import (
     StoryJob, get_story_files, count_story_files, get_next_story_batch,
@@ -57,11 +58,21 @@ from controllers.story_controller import (
 )
 from controllers.reels_controller import ReelsJob, get_reels_files, count_reels_files, check_reels_duration
 from services import get_pages, PageFetchWorker, TokenExchangeWorker, AllPagesFetchWorker
+from services import (
+    resumable_upload, apply_watermark_to_video,
+    cleanup_temp_watermark_file, upload_video_once
+)
 from core import (
     get_resource_path, get_subprocess_args, run_subprocess, create_popen, SmartUploadScheduler,
     APIUsageTracker, APIWarningSystem, get_api_tracker, get_api_warning_system,
     API_CALLS_PER_STORY, get_date_placeholder, apply_title_placeholders,
-    make_job_key, get_job_key
+    make_job_key, get_job_key,
+    # Video utils
+    validate_video, clean_filename_for_title, calculate_jitter_interval,
+    sort_video_files, apply_template,
+    # Updater utils
+    check_for_updates, get_installed_versions, create_update_script,
+    run_update_and_restart, UPDATE_PACKAGES
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QTime, QThread
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QBrush, QFont, QFontMetrics, QTextCursor
@@ -93,7 +104,7 @@ from core import (
 # استيراد المجدولات مباشرة لتجنب circular import
 # Import schedulers directly to avoid circular import
 from core.schedulers import SchedulerThread, StorySchedulerThread, ReelsSchedulerThread
-from ui.widgets import NoScrollComboBox, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollSlider
+from ui.widgets import NoScrollComboBox, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollSlider, JobListItemWidget
 from ui.dialogs import (
     HashtagManagerDialog as HashtagManagerDialogBase,
     ScheduleTemplatesDialog,
@@ -345,438 +356,6 @@ def wait_for_internet(log_fn=None, check_interval: int = 60, max_attempts: int =
 
         _log(f'📶 لا يوجد اتصال بالإنترنت - المحاولة {attempts} - الانتظار {check_interval} ثانية...')
         time.sleep(check_interval)
-
-
-# ==================== Library Update System ====================
-
-# قائمة المكتبات التي نتحقق من تحديثاتها
-UPDATE_PACKAGES = ['requests', 'PySide6', 'pyqtdarktheme', 'qtawesome']
-
-
-def _get_subprocess_windows_args() -> tuple:
-    """
-    الحصول على معاملات subprocess لإخفاء نافذة Console على Windows.
-
-    العائد:
-        tuple: (startupinfo, creationflags)
-    """
-    startupinfo = None
-    creationflags = 0
-    if sys.platform == 'win32':
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        creationflags = subprocess.CREATE_NO_WINDOW
-    return startupinfo, creationflags
-
-
-def check_for_updates(log_fn=None) -> list:
-    """
-    التحقق من وجود تحديثات للمكتبات.
-
-    العائد:
-        قائمة بالمكتبات التي تحتاج تحديث: [(name, current_version, latest_version), ...]
-    """
-    updates = []
-    packages_lower = [p.lower() for p in UPDATE_PACKAGES]
-
-    try:
-        # إخفاء نافذة الـ Console على Windows
-        startupinfo, creationflags = _get_subprocess_windows_args()
-
-        # الحصول على قائمة المكتبات القديمة
-        result = subprocess.run(
-            [sys.executable, '-m', 'pip', 'list', '--outdated', '--format=json'],
-            capture_output=True,
-            text=True,
-            timeout=30,  # تقليل من 60 إلى 30
-            startupinfo=startupinfo,
-            creationflags=creationflags
-        )
-
-        if result.returncode == 0 and result.stdout.strip():
-            try:
-                outdated = json.loads(result.stdout)
-                for pkg in outdated:
-                    if pkg.get('name', '').lower() in packages_lower:
-                        updates.append((
-                            pkg.get('name'),
-                            pkg.get('version'),
-                            pkg.get('latest_version')
-                        ))
-            except json.JSONDecodeError:
-                pass
-    except subprocess.TimeoutExpired:
-        if log_fn:
-            log_fn('⚠️ انتهت مهلة التحقق من التحديثات')
-    except Exception as e:
-        if log_fn:
-            log_fn(f'❌ خطأ في التحقق من التحديثات: {e}')
-
-    return updates
-
-
-def get_installed_versions() -> dict:
-    """الحصول على إصدارات المكتبات المثبتة."""
-    versions = {}
-
-    try:
-        # إخفاء نافذة الـ Console على Windows
-        startupinfo, creationflags = _get_subprocess_windows_args()
-
-        result = subprocess.run(
-            [sys.executable, '-m', 'pip', 'list', '--format=json'],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            startupinfo=startupinfo,
-            creationflags=creationflags
-        )
-
-        if result.returncode == 0:
-            installed = json.loads(result.stdout)
-
-            for pkg in installed:
-                if pkg['name'].lower() in [p.lower() for p in UPDATE_PACKAGES]:
-                    versions[pkg['name']] = pkg['version']
-    except Exception:
-        pass
-
-    return versions
-
-
-def _validate_package_name(package_name: str) -> bool:
-    """
-    Validate package name to prevent command injection.
-    التحقق من صحة اسم الحزمة لمنع حقن الأوامر.
-
-    Args:
-        package_name: Package name to validate
-
-    Returns:
-        True if valid, False otherwise
-    """
-    # Package names should only contain alphanumeric, hyphen, underscore, dot
-    # Hyphen at end of character class to avoid escaping
-    pattern = r'^[a-zA-Z0-9_.]+[a-zA-Z0-9_.-]*$'
-    return bool(re.match(pattern, package_name))
-
-
-def create_update_script(packages_to_update: list) -> str:
-    """
-    Create temporary update script.
-    إنشاء سكربت التحديث المؤقت.
-
-    Args:
-        packages_to_update: List of package names to update
-
-    Returns:
-        Path to temporary script
-    """
-    # Validate all package names to prevent command injection
-    for pkg in packages_to_update:
-        if not _validate_package_name(pkg):
-            raise ValueError(f"Invalid package name: {pkg}")
-
-    # Only allow packages from our whitelist
-    allowed_packages = [p.lower() for p in UPDATE_PACKAGES]
-    validated_packages = [pkg for pkg in packages_to_update if pkg.lower() in allowed_packages]
-
-    if not validated_packages:
-        raise ValueError("No valid packages to update")
-
-    packages_str = ' '.join(validated_packages)
-    python_path = sys.executable
-    script_path = os.path.abspath(sys.argv[0])
-
-    if sys.platform == 'win32':
-        # Windows batch script
-        script_content = f'''@echo off
-chcp 65001 > nul
-echo.
-echo ══════════════════════════════════════════════════
-echo    جاري تحديث المكتبات - يرجى الانتظار...
-echo ══════════════════════════════════════════════════
-echo.
-timeout /t 3 /nobreak > nul
-"{python_path}" -m pip install --upgrade {packages_str}
-echo.
-echo ══════════════════════════════════════════════════
-echo    ✅ تم التحديث بنجاح!
-echo    جاري إعادة تشغيل البرنامج...
-echo ══════════════════════════════════════════════════
-echo.
-timeout /t 2 /nobreak > nul
-start "" "{python_path}" "{script_path}"
-del "%~f0"
-'''
-        script_file = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.bat', delete=False, encoding='utf-8'
-        )
-    else:
-        # Linux/Mac shell script
-        script_content = f'''#!/bin/bash
-echo ""
-echo "══════════════════════════════════════════════════"
-echo "   جاري تحديث المكتبات - يرجى الانتظار..."
-echo "══════════════════════════════════════════════════"
-echo ""
-sleep 3
-"{python_path}" -m pip install --upgrade {packages_str}
-echo ""
-echo "══════════════════════════════════════════════════"
-echo "   ✅ تم التحديث بنجاح!"
-echo "   جاري إعادة تشغيل البرنامج..."
-echo "══════════════════════════════════════════════════"
-echo ""
-sleep 2
-"{python_path}" "{script_path}" &
-rm -- "$0"
-'''
-        script_file = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.sh', delete=False, encoding='utf-8'
-        )
-
-    script_file.write(script_content)
-    script_file.close()
-
-    # جعل السكربت قابل للتنفيذ على Linux/Mac
-    if sys.platform != 'win32':
-        os.chmod(script_file.name, 0o755)
-
-    return script_file.name
-
-
-def run_update_and_restart(packages_to_update: list):
-    """
-    تشغيل سكربت التحديث وإغلاق البرنامج.
-    """
-    script_path = create_update_script(packages_to_update)
-
-    if sys.platform == 'win32':
-        # تشغيل السكربت في نافذة جديدة
-        os.startfile(script_path)
-    else:
-        # تشغيل السكربت في الخلفية
-        subprocess.Popen(['bash', script_path], start_new_session=True)
-
-    # إغلاق البرنامج
-    sys.exit(0)
-
-
-# ==================== Title Cleaner ====================
-
-# كلمات يجب إزالتها من أسماء الملفات (lowercase فقط - المقارنة تتم بـ case-insensitive)
-TITLE_CLEANUP_WORDS = [
-    'hd', 'fhd', 'uhd', 'sd', '4k', '8k', '1080p', '720p', '480p', '360p', '240p',
-    'mp4', 'mov', 'avi', 'mkv', 'wmv', 'flv', 'webm',
-    'copyright', 'free', 'no copyright', 'royalty free', 'ncs', 'nocopyright',
-    'official', 'video', 'clip', 'music', 'audio', 'lyrics', 'lyric',
-    'download', 'full', 'complete', 'final', 'version', 'edit', 'remix',
-    'www', 'http', 'https', 'com', 'net', 'org',
-    'hq', 'lq', 'high quality', 'low quality',
-]
-
-# أنماط regex للتنظيف
-TITLE_CLEANUP_PATTERNS = [
-    r'\[.*?\]',           # إزالة النص بين الأقواس المربعة [...]
-    r'\(.*?\)',           # إزالة النص بين الأقواس الدائرية (...)
-    r'\{.*?\}',           # إزالة النص بين الأقواس المعقوصة {...}
-    r'@\w+',              # إزالة mentions
-    r'#\w+',              # إزالة hashtags من الاسم
-    r'https?://\S+',      # إزالة الروابط
-    r'\b\d{3,4}p\b',      # إزالة الدقة مثل 1080p, 720p
-    r'\b[Hh][Dd]\b',      # إزالة HD
-    r'\b[4-8][Kk]\b',     # إزالة 4K, 8K
-    r'\b(19|20)\d{2}\b',  # إزالة السنوات (1900-2099)
-]
-
-
-def clean_filename_for_title(filename: str, remove_extension: bool = True) -> str:
-    """
-    تنظيف اسم الملف لاستخدامه كعنوان.
-
-    المعاملات:
-        filename: اسم الملف الأصلي
-        remove_extension: إزالة امتداد الملف
-
-    العائد:
-        اسم الملف المُنظّف والمقروء
-    """
-    if not filename:
-        return filename
-
-    title = filename
-
-    # إزالة الامتداد إذا طُلب
-    if remove_extension:
-        title = os.path.splitext(title)[0]
-
-    # استبدال الرموز بمسافات
-    title = title.replace('_', ' ')
-    title = title.replace('-', ' ')
-    title = title.replace('.', ' ')
-    title = title.replace('+', ' ')
-    title = title.replace('~', ' ')
-
-    # تطبيق أنماط regex
-    for pattern in TITLE_CLEANUP_PATTERNS:
-        title = re.sub(pattern, '', title, flags=re.IGNORECASE)
-
-    # إزالة الكلمات غير المرغوبة (TITLE_CLEANUP_WORDS already lowercase)
-    words = title.split()
-    cleaned_words = []
-    for word in words:
-        word_lower = word.lower().strip()
-        # تحقق من الكلمات الكاملة فقط
-        if word_lower not in TITLE_CLEANUP_WORDS:
-            cleaned_words.append(word)
-
-    title = ' '.join(cleaned_words)
-
-    # إزالة المسافات المتعددة
-    title = re.sub(r'\s+', ' ', title)
-
-    # إزالة المسافات من البداية والنهاية
-    title = title.strip()
-
-    # تحويل الحرف الأول إلى حرف كبير
-    if title:
-        title = title[0].upper() + title[1:] if len(title) > 1 else title.upper()
-
-    return title
-
-
-# ==================== Random Jitter (Anti-Ban) ====================
-
-def calculate_jitter_interval(base_interval: int, jitter_percent: int = 10) -> int:
-    """
-    حساب الفاصل الزمني مع نطاق عشوائي لمحاكاة السلوك البشري.
-
-    المعاملات:
-        base_interval: الفاصل الزمني الأساسي بالثواني
-        jitter_percent: نسبة التباين المئوية (مثلاً 10 = ±10%)
-
-    العائد:
-        الفاصل الزمني مع التباين العشوائي
-    """
-    if jitter_percent <= 0:
-        return base_interval
-
-    # حساب نطاق التباين
-    variation = int(base_interval * jitter_percent / 100)
-
-    # إنشاء قيمة عشوائية ضمن النطاق
-    jitter = random.randint(-variation, variation)
-
-    # التأكد من أن النتيجة إيجابية (حد أدنى 10 ثواني)
-    return max(10, base_interval + jitter)
-
-
-# ==================== Video Sorting ====================
-
-def sort_video_files(files: list, sort_by: str = 'name', reverse: bool = False) -> list:
-    """
-    ترتيب ملفات الفيديو حسب المعيار المحدد.
-
-    المعاملات:
-        files: قائمة مسارات الملفات (Path objects)
-        sort_by: معيار الترتيب ('name', 'random', 'date_created', 'date_modified')
-        reverse: عكس الترتيب
-
-    العائد:
-        القائمة المرتبة
-    """
-    if not files:
-        return files
-
-    if sort_by == 'random':
-        # ترتيب عشوائي
-        shuffled = list(files)
-        random.shuffle(shuffled)
-        return shuffled
-
-    elif sort_by == 'date_created':
-        # ترتيب حسب تاريخ الإنشاء
-        try:
-            return sorted(files, key=lambda f: f.stat().st_ctime, reverse=reverse)
-        except Exception:
-            return sorted(files, key=lambda f: f.name.lower(), reverse=reverse)
-
-    elif sort_by == 'date_modified':
-        # ترتيب حسب تاريخ التعديل
-        try:
-            return sorted(files, key=lambda f: f.stat().st_mtime, reverse=reverse)
-        except Exception:
-            return sorted(files, key=lambda f: f.name.lower(), reverse=reverse)
-
-    else:
-        # الافتراضي: ترتيب أبجدي
-        return sorted(files, key=lambda f: f.name.lower(), reverse=reverse)
-
-
-# ==================== Video Validation ====================
-
-def validate_video(video_path: str, log_fn=None) -> dict:
-    """
-    التحقق من صحة ملف الفيديو قبل الرفع.
-
-    المعاملات:
-        video_path: مسار ملف الفيديو
-        log_fn: دالة للتسجيل
-
-    العائد:
-        dict يحتوي على:
-        - valid: bool - هل الملف صالح
-        - duration: float - مدة الفيديو بالثواني
-        - error: str - رسالة الخطأ إن وجدت
-    """
-    def _log(msg):
-        if log_fn:
-            log_fn(msg)
-
-    result = {'valid': False, 'duration': 0, 'error': None}
-
-    if not os.path.exists(video_path):
-        result['error'] = 'الملف غير موجود'
-        return result
-
-    # التحقق من حجم الملف
-    file_size = os.path.getsize(video_path)
-    if file_size == 0:
-        result['error'] = 'الملف فارغ'
-        return result
-
-    # محاولة استخدام ffprobe للتحقق من الفيديو
-    try:
-        cmd = [
-            'ffprobe', '-v', 'error', '-show_entries',
-            'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
-            video_path
-        ]
-        output = run_subprocess(cmd, timeout=30, text=True)
-
-        if output.returncode == 0 and output.stdout.strip():
-            duration = float(output.stdout.strip())
-            result['valid'] = True
-            result['duration'] = duration
-
-            # التحقق من مدة الفيديو
-            if duration > MAX_VIDEO_DURATION_SECONDS:
-                result['valid'] = False
-                result['error'] = 'مدة الفيديو تتجاوز الحد الأقصى (4 ساعات)'
-        else:
-            result['error'] = 'فشل في قراءة معلومات الفيديو'
-    except FileNotFoundError:
-        # ffprobe غير متوفر، نفترض صلاحية الملف
-        _log('تحذير: ffprobe غير متوفر، تم تخطي التحقق من صحة الفيديو')
-        result['valid'] = True
-    except subprocess.TimeoutExpired:
-        result['error'] = 'انتهت مهلة التحقق من الفيديو'
-    except Exception as e:
-        result['error'] = f'خطأ في التحقق: {str(e)}'
-
-    return result
 
 
 # ==================== Module Initialization ====================
@@ -1135,286 +714,26 @@ def _get_jobs_file() -> Path:
     return get_jobs_file()
 
 
-class PageJob:
-    """
-    تمثيل وظيفة رفع فيديوهات لصفحة فيسبوك.
+# ==================== Module Initialization ====================
+# تهيئة قاعدة البيانات عند تحميل الوحدة
+# Database is initialized in admin.py before this module is imported
+# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
+migrate_old_files()
 
-    ملاحظة ترتيب الأقفال:
-    - _state_lock: قفل خفيف لحماية enabled و cancel_requested (لا يجب الاحتفاظ به أثناء I/O)
-    - lock: قفل لمنع التشغيل المتزامن لعمليات الرفع (يمكن الاحتفاظ به لفترة طويلة)
+# Step 1: Run legacy database initialization for other tables
+migrate_json_to_sqlite()
 
-    لا يجب أبداً الحصول على _state_lock أثناء الاحتفاظ بـ lock لتجنب حالات الجمود.
-
-    الفرق بين enabled و is_scheduled:
-    - enabled: حالة التفعيل (مفعّل/معطّل) - لا يؤثر على العدّاد أو الجدولة
-    - is_scheduled: حالة الجدولة الفعلية - عند True يبدأ العدّاد والجدولة
-    """
-    def __init__(self, page_id, page_name, folder,
-                 interval_seconds=10800,
-                 page_access_token=None,
-                 title_template="{filename}",
-                 description_template="",
-                 chunk_size=CHUNK_SIZE_DEFAULT,
-                 use_filename_as_title=False,
-                 enabled=True,
-                 is_scheduled=False,
-                 next_run_timestamp=None,
-                 sort_by='name',
-                 jitter_enabled=False,
-                 jitter_percent=10,
-                 watermark_enabled=False,
-                 watermark_path='',
-                 watermark_position='bottom_right',
-                 watermark_opacity=0.8,
-                 watermark_scale=0.15,
-                 use_smart_schedule=False,
-                 template_id=None,
-                 app_name=''):
-        self.page_id = page_id
-        self.page_name = page_name
-        self.app_name = app_name  # اسم التطبيق المصدر للصفحة
-        self.folder = folder
-        self.interval_seconds = int(interval_seconds)
-        self.page_access_token = page_access_token
-        self.next_index = 0
-        self.title_template = title_template
-        self.description_template = description_template
-        self.chunk_size = chunk_size
-        self.use_filename_as_title = use_filename_as_title
-        self._enabled = enabled
-        self._is_scheduled = is_scheduled
-        self._cancel_requested = False
-        # ختم وقت يونكس للتشغيل التالي - إذا لم يُحدد يتم تعيينه إلى الآن + الفاصل الزمني
-        self._next_run_timestamp = next_run_timestamp if next_run_timestamp is not None else (time.time() + max(1, int(interval_seconds)))
-        # قفل خفيف لحماية القيم البولية - لا يحتفظ به أثناء عمليات I/O
-        self._state_lock = threading.Lock()
-        # قفل لمنع التشغيل المتزامن لعمليات الرفع - قد يحتفظ به لفترة طويلة
-        self.lock = threading.Lock()
-        # خيارات جديدة
-        self.sort_by = sort_by  # 'name', 'random', 'date_created', 'date_modified'
-        self.jitter_enabled = jitter_enabled  # تفعيل التوقيت العشوائي
-        self.jitter_percent = jitter_percent  # نسبة التباين %
-        # إعدادات العلامة المائية لكل مهمة
-        self.watermark_enabled = watermark_enabled
-        self.watermark_path = watermark_path
-        self.watermark_position = watermark_position
-        self.watermark_opacity = watermark_opacity
-        self.watermark_scale = watermark_scale
-        # إحداثيات العلامة المائية المخصصة (من السحب بالماوس)
-        self.watermark_x = None  # إحداثي X (None = استخدام position)
-        self.watermark_y = None  # إحداثي Y (None = استخدام position)
-        # إعدادات الجدولة الذكية
-        self.use_smart_schedule = use_smart_schedule
-        self.template_id = template_id
-
-    @property
-    def enabled(self):
-        """الحصول على حالة التفعيل بشكل آمن من الـ threads."""
-        with self._state_lock:
-            return self._enabled
-
-    @enabled.setter
-    def enabled(self, value):
-        """تعيين حالة التفعيل بشكل آمن من الـ threads."""
-        with self._state_lock:
-            self._enabled = value
-
-    @property
-    def is_scheduled(self):
-        """الحصول على حالة الجدولة بشكل آمن من الـ threads."""
-        with self._state_lock:
-            return self._is_scheduled
-
-    @is_scheduled.setter
-    def is_scheduled(self, value):
-        """تعيين حالة الجدولة بشكل آمن من الـ threads."""
-        with self._state_lock:
-            self._is_scheduled = value
-
-    @property
-    def cancel_requested(self):
-        """الحصول على حالة طلب الإلغاء بشكل آمن من الـ threads."""
-        with self._state_lock:
-            return self._cancel_requested
-
-    @cancel_requested.setter
-    def cancel_requested(self, value):
-        """تعيين حالة طلب الإلغاء بشكل آمن من الـ threads."""
-        with self._state_lock:
-            self._cancel_requested = value
-
-    def check_and_reset_cancel(self):
-        """التحقق من حالة الإلغاء وإعادة ضبطها بشكل ذري."""
-        with self._state_lock:
-            if self._cancel_requested:
-                self._cancel_requested = False
-                return True
-            return False
-
-    @property
-    def next_run_timestamp(self):
-        """الحصول على ختم وقت التشغيل التالي بشكل آمن من الـ threads."""
-        with self._state_lock:
-            return self._next_run_timestamp
-
-    @next_run_timestamp.setter
-    def next_run_timestamp(self, value):
-        """تعيين ختم وقت التشغيل التالي بشكل آمن من الـ threads."""
-        with self._state_lock:
-            self._next_run_timestamp = value
-
-    def reset_next_run_timestamp(self):
-        """
-        إعادة ضبط وقت التشغيل التالي.
-
-        تستخدم الجدولة الذكية إذا كانت مفعلة (use_smart_schedule=True و template_id موجود)،
-        وإلا تستخدم الفاصل الزمني التقليدي.
-        """
-        next_time = None
-
-        # محاولة استخدام الجدولة الذكية إذا كانت مفعلة
-        if self.use_smart_schedule and self.template_id is not None:
-            try:
-                # استيراد محلي لتجنب الاستيراد الدائري
-                from core import calculate_next_run_from_template
-                from services import get_database_manager
-
-                # الحصول على القالب من قاعدة البيانات
-                db = get_database_manager()
-                template = db.get_template_by_id(self.template_id)
-
-                if template:
-                    from datetime import datetime
-                    next_datetime = calculate_next_run_from_template(template)
-
-                    if next_datetime:
-                        next_time = next_datetime.timestamp()
-                        log_debug(f"[SmartSchedule] الوقت التالي للوظيفة {self.page_name}: {next_datetime.strftime('%Y-%m-%d %H:%M')}")
-                    else:
-                        log_warning(f"[SmartSchedule] فشل حساب الوقت التالي من القالب {self.template_id} - استخدام الفاصل الزمني")
-                else:
-                    log_warning(f"[SmartSchedule] القالب {self.template_id} غير موجود - استخدام الفاصل الزمني")
-
-            except Exception as e:
-                log_warning(f"[SmartSchedule] خطأ في حساب الوقت من القالب: {e} - استخدام الفاصل الزمني")
-
-        # إذا فشلت الجدولة الذكية أو لم تكن مفعلة، استخدم الفاصل الزمني
-        if next_time is None:
-            # تطبيق التوقيت العشوائي إذا كان مفعّلاً
-            interval = self.interval_seconds
-            if self.jitter_enabled and self.jitter_percent > 0:
-                interval = calculate_jitter_interval(interval, self.jitter_percent)
-            next_time = time.time() + max(1, int(interval))
-
-        self.next_run_timestamp = next_time
-
-    def to_dict(self):
-        return {
-            'page_id': self.page_id,
-            'page_name': self.page_name,
-            'app_name': self.app_name,
-            'folder': self.folder,
-            'interval_seconds': self.interval_seconds,
-            'page_access_token': self.page_access_token,
-            'next_index': self.next_index,
-            'title_template': self.title_template,
-            'description_template': self.description_template,
-            'chunk_size': self.chunk_size,
-            'use_filename_as_title': self.use_filename_as_title,
-            'enabled': self.enabled,
-            'is_scheduled': self.is_scheduled,
-            'next_run_timestamp': self.next_run_timestamp,
-            'sort_by': self.sort_by,
-            'jitter_enabled': self.jitter_enabled,
-            'jitter_percent': self.jitter_percent,
-            'watermark_enabled': self.watermark_enabled,
-            'watermark_path': self.watermark_path,
-            'watermark_position': self.watermark_position,
-            'watermark_opacity': self.watermark_opacity,
-            'watermark_scale': self.watermark_scale,
-            'watermark_x': self.watermark_x,
-            'watermark_y': self.watermark_y,
-            'use_smart_schedule': self.use_smart_schedule,
-            'template_id': self.template_id
-        }
-
-    @classmethod
-    def from_dict(cls, d):
-        secs = d.get('interval_seconds', 10800)
-        # إذا كان next_run_timestamp محفوظاً نستخدمه، وإلا نعيّنه إلى الآن + الفاصل الزمني
-        saved_timestamp = d.get('next_run_timestamp')
-        obj = cls(
-            d['page_id'],
-            d.get('page_name', ''),
-            d.get('folder', ''),
-            secs,
-            d.get('page_access_token'),
-            d.get('title_template', "{filename}"),
-            d.get('description_template', ""),
-            d.get('chunk_size', CHUNK_SIZE_DEFAULT),
-            d.get('use_filename_as_title', False),
-            d.get('enabled', True),
-            d.get('is_scheduled', False),
-            next_run_timestamp=saved_timestamp,
-            sort_by=d.get('sort_by', 'name'),
-            jitter_enabled=d.get('jitter_enabled', False),
-            jitter_percent=d.get('jitter_percent', 10),
-            watermark_enabled=d.get('watermark_enabled', False),
-            watermark_path=d.get('watermark_path', ''),
-            watermark_position=d.get('watermark_position', 'bottom_right'),
-            watermark_opacity=d.get('watermark_opacity', 0.8),
-            watermark_scale=d.get('watermark_scale', 0.15),
-            use_smart_schedule=d.get('use_smart_schedule', False),
-            template_id=d.get('template_id'),
-            app_name=d.get('app_name', '')
-        )
-        obj.next_index = d.get('next_index', 0)
-        obj.watermark_x = d.get('watermark_x')
-        obj.watermark_y = d.get('watermark_y')
-        return obj
+# Step 2: Run legacy template initialization (for backwards compatibility)
+init_default_templates()  # إنشاء قوالب الجداول الافتراضية
+ensure_default_templates()  # ضمان وجود القوالب الافتراضية (للترقية)
 
 
-def apply_template(template_str, page_job: PageJob, filename: str, file_index: int, total_files: int):
-    """
-    تطبيق قالب على النص مع استبدال المتغيرات.
+# ==================== Notification Systems ====================
+# TelegramNotifier and NotificationSystem have been moved to core/notifications.py
+# They are imported above from core
 
-    المتغيرات المدعومة:
-        {filename} - اسم الملف
-        {page_name} - اسم الصفحة
-        {page_id} - معرف الصفحة
-        {index} - رقم الملف الحالي
-        {total} - إجمالي الملفات
-        {datetime} - التاريخ والوقت
-        {date} - التاريخ فقط (YYYY-MM-DD)
-        {date_ymd} - التاريخ (YYYY-MM-DD)
-        {date_dmy} - التاريخ (DD/MM/YYYY)
-        {date_time} - التاريخ والوقت (YYYY-MM-DD HH:MM)
-        {time} - الوقت فقط
-        {day} - اسم اليوم بالعربية
-        {random_emoji} - إيموجي عشوائي
-    """
-    now = datetime.now()
-    days_ar = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
-
-    repl = {
-        'filename': filename,
-        'page_name': page_job.page_name,
-        'page_id': page_job.page_id,
-        'index': file_index,
-        'total': total_files,
-        'datetime': now.strftime('%Y-%m-%d %H:%M:%S'),
-        'date': now.strftime('%Y-%m-%d'),
-        'date_ymd': now.strftime('%Y-%m-%d'),
-        'date_dmy': now.strftime('%d/%m/%Y'),
-        'date_time': now.strftime('%Y-%m-%d %H:%M'),
-        'time': now.strftime('%H:%M'),
-        'day': days_ar[now.weekday()],
-        'random_emoji': get_random_emoji(),
-    }
-    out = template_str or ""
-    for k, v in repl.items():
-        out = out.replace(f'{{{k}}}', str(v))
-    return out
+# مثيل عام لنظام إشعارات Telegram
+telegram_notifier = TelegramNotifier()
 
 
 def move_video_to_uploaded_folder(video_path: str, log_fn=None) -> bool:
@@ -1572,381 +891,6 @@ def is_rate_limit_error(body) -> bool:
     """
     return _upload_service.is_rate_limit_error(body)
 
-
-
-
-class JobListItemWidget(QWidget):
-    """ويدجت مخصص لعنصر الوظيفة في القائمة مع عدّاد ملوّن في مكان ثابت."""
-
-    # ثوابت لعرض الأعمدة الثابتة
-    COUNTDOWN_WIDTH = 120
-    STATUS_WIDTH = 80
-    MARGINS_WIDTH = 40  # الهوامش والمسافات
-
-    def __init__(self, job, parent=None):  # يقبل PageJob أو StoryJob
-        super().__init__(parent)
-        self.job = job
-        self._setup_ui()
-
-    def _setup_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(8)
-
-        # ترتيب الأعمدة بحيث يظهر العدّاد أولاً (أقصى اليسار في LTR = أقصى اليمين في RTL)
-        # ثم الحالة، ثم معلومات الوظيفة
-
-        # عدّاد الوقت المتبقي (عرض ثابت مع خلفية مميزة)
-        self.countdown_label = QLabel()
-        self.countdown_label.setFixedWidth(self.COUNTDOWN_WIDTH)
-        self.countdown_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.countdown_label)
-
-        # مؤشر حالة الوظيفة (مفعّلة/معطّلة + مجدولة/غير مجدولة) - عمود ثابت
-        self.status_label = QLabel()
-        self.status_label.setFixedWidth(self.STATUS_WIDTH)
-        self.status_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.status_label)
-
-        # معلومات الوظيفة (تأخذ المساحة المتبقية مع اقتطاع النص الطويل)
-        self.info_label = QLabel()
-        self.info_label.setMinimumWidth(100)
-        self.info_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)  # محاذاة النص لليمين
-        layout.addWidget(self.info_label, 1)  # stretch=1 للتمدد
-
-        self.update_display()
-
-    def _elide_text(self, text: str, max_width: int) -> str:
-        """اقتطاع النص مع إضافة ... إذا تجاوز العرض المحدد."""
-        fm = QFontMetrics(self.info_label.font())
-        return fm.elidedText(text, Qt.ElideMiddle, max_width)
-
-    def update_display(self, remaining_seconds=None, outside_working_hours=False, time_to_working_hours=0):
-        """تحديث عرض معلومات الوظيفة والعدّاد (Requirement 1 - العداد الذكي)."""
-
-        # التحقق من نظام الجدولة المستخدم (ذكي أو فاصل زمني)
-        use_smart_schedule = getattr(self.job, 'use_smart_schedule', False)
-        template_id = getattr(self.job, 'template_id', None)
-
-        if use_smart_schedule and template_id:
-            # عرض اسم القالب عند استخدام الجدولة الذكية
-            template = get_template_by_id(template_id)
-            if template:
-                schedule_info = f"📅 {template['name']}"
-            else:
-                # القالب غير موجود - العودة للفاصل الزمني
-                val, unit = seconds_to_value_unit(self.job.interval_seconds)
-                schedule_info = f"كل {val} {unit}"
-        else:
-            # نظام الفاصل الزمني
-            val, unit = seconds_to_value_unit(self.job.interval_seconds)
-            schedule_info = f"كل {val} {unit}"
-
-        # عرض اسم التطبيق إذا كان موجوداً
-        app_name = getattr(self.job, 'app_name', '')
-        if app_name:
-            info_text = f"{self.job.page_name} | {app_name} | ID: {self.job.page_id} - مجلد: {self.job.folder} - {schedule_info}"
-        else:
-            info_text = f"{self.job.page_name} | ID: {self.job.page_id} - مجلد: {self.job.folder} - {schedule_info}"
-
-        # حساب العرض المتاح لنص المعلومات (العرض الكلي - عرض الحالة والعدّاد - الهوامش)
-        available_width = self.width() - self.COUNTDOWN_WIDTH - self.STATUS_WIDTH - self.MARGINS_WIDTH
-        if available_width > 100:
-            elided_text = self._elide_text(info_text, available_width)
-            self.info_label.setText(elided_text)
-            # عرض النص الكامل كتلميح فقط إذا تم اقتطاع النص
-            if elided_text != info_text:
-                self.info_label.setToolTip(info_text)
-            else:
-                self.info_label.setToolTip('')
-        else:
-            self.info_label.setText(info_text)
-            self.info_label.setToolTip('')
-
-        # تحديث حالة الوظيفة
-        if not self.job.enabled:
-            self.status_label.setText('معطّل')
-            self.status_label.setStyleSheet(f'color: {COUNTDOWN_COLOR_GRAY}; font-weight: bold;')
-            self.countdown_label.setText('--:--:--')
-        elif self.job.is_scheduled:
-            if outside_working_hours:
-                # خارج ساعات العمل - عرض الوقت المتبقي لبداية ساعات العمل (Requirement 1)
-                self.status_label.setText('خارج ساعات العمل')
-                self.status_label.setStyleSheet(f'color: {COUNTDOWN_COLOR_YELLOW}; font-weight: bold;')
-                self.countdown_label.setText(f'⏳ تبدأ بعد: {format_remaining_time(time_to_working_hours)}')
-            else:
-                self.status_label.setText('مجدول')
-                self.status_label.setStyleSheet(f'color: {COUNTDOWN_COLOR_GREEN}; font-weight: bold;')
-                if remaining_seconds is not None:
-                    self.countdown_label.setText(format_remaining_time(remaining_seconds))
-                else:
-                    self.countdown_label.setText('--:--:--')
-        else:
-            # مفعّل لكن غير مجدول
-            self.status_label.setText('مفعّل')
-            self.status_label.setStyleSheet(f'color: {COUNTDOWN_COLOR_YELLOW}; font-weight: bold;')
-            self.countdown_label.setText('غير مجدول')
-
-        self.update_countdown_style(remaining_seconds, outside_working_hours)
-
-    def update_countdown_style(self, remaining_seconds=None, outside_working_hours=False):
-        """تحديث لون العدّاد بناءً على الوقت المتبقي مع خلفية مميزة (Requirement 1)."""
-        # ستايل أساسي للعدّاد مع خلفية داكنة وزوايا مستديرة
-        base_style = 'font-weight: bold; padding: 4px 8px; border-radius: 4px;'
-
-        if not self.job.enabled:
-            # رمادي داكن للوظائف المعطّلة
-            self.countdown_label.setStyleSheet(
-                f'color: {COUNTDOWN_COLOR_GRAY}; background-color: #1a1d23; {base_style}'
-            )
-        elif outside_working_hours:
-            # برتقالي لخارج ساعات العمل (Requirement 1)
-            self.countdown_label.setStyleSheet(
-                f'color: #FF9800; background-color: #2a1f10; {base_style}'
-            )
-        elif not self.job.is_scheduled:
-            # أصفر للوظائف المفعّلة لكن غير المجدولة
-            self.countdown_label.setStyleSheet(
-                f'color: {COUNTDOWN_COLOR_YELLOW}; background-color: #2a2510; {base_style}'
-            )
-        elif remaining_seconds is None:
-            self.countdown_label.setStyleSheet(
-                f'color: {COUNTDOWN_COLOR_GRAY}; background-color: #1a1d23; {base_style}'
-            )
-        elif remaining_seconds >= 300:  # أخضر: ≥5 دقائق
-            self.countdown_label.setStyleSheet(
-                f'color: {COUNTDOWN_COLOR_GREEN}; background-color: #0d2818; {base_style}'
-            )
-        elif remaining_seconds >= 60:  # أصفر: 1-5 دقائق
-            self.countdown_label.setStyleSheet(
-                f'color: {COUNTDOWN_COLOR_YELLOW}; background-color: #2a2510; {base_style}'
-            )
-        else:  # أحمر: <1 دقيقة
-            self.countdown_label.setStyleSheet(
-                f'color: {COUNTDOWN_COLOR_RED}; background-color: #2a1010; {base_style}'
-            )
-
-def resumable_upload(page_job: PageJob, video_path, token, ui_signals: UiSignals,
-                     final_title="", final_description=""):
-    """
-    رفع فيديو بشكل مجزأ إلى فيسبوك.
-    Upload video to Facebook in chunks (resumable upload).
-
-    Args:
-        page_job: وظيفة الصفحة - Page job
-        video_path: مسار الفيديو - Video path
-        token: توكن الوصول - Access token
-        ui_signals: إشارات الواجهة - UI signals
-        final_title: عنوان الفيديو - Video title
-        final_description: وصف الفيديو - Video description
-
-    Returns:
-        tuple: (status_code, response_body)
-    """
-    chunk_size = page_job.chunk_size if page_job.chunk_size > 0 else CHUNK_SIZE_DEFAULT
-
-    return _upload_service.resumable_upload(
-        page_id=page_job.page_id,
-        video_path=video_path,
-        token=token,
-        ui_signals=ui_signals,
-        final_title=final_title,
-        final_description=final_description,
-        chunk_size=chunk_size,
-        upload_timeout_start=UPLOAD_TIMEOUT_START,
-        upload_timeout_transfer=UPLOAD_TIMEOUT_TRANSFER,
-        upload_timeout_finish=UPLOAD_TIMEOUT_FINISH,
-        page_job=page_job
-    )
-
-
-def apply_watermark_to_video(video_path: str, job: PageJob, log_fn) -> str:
-    """
-    تطبيق العلامة المائية على الفيديو إذا كانت مفعلة بشكل آمن.
-    Apply watermark to video if enabled.
-
-    المعاملات:
-        video_path: مسار الفيديو الأصلي - Original video path
-        job: وظيفة الصفحة التي تحتوي على إعدادات العلامة المائية - Page job with watermark settings
-        log_fn: دالة التسجيل - Logging function
-
-    العائد:
-        مسار الفيديو النهائي (الأصلي أو المعدّل)
-        Final video path (original or modified)
-    """
-    # التحقق من تفعيل العلامة المائية
-    if not getattr(job, 'watermark_enabled', False):
-        return video_path
-
-    watermark_path = getattr(job, 'watermark_path', '')
-    if not watermark_path:
-        return video_path
-
-    # الحصول على إعدادات العلامة المائية
-    position = getattr(job, 'watermark_position', 'bottom_right')
-    opacity = getattr(job, 'watermark_opacity', 0.8)
-    scale = getattr(job, 'watermark_scale', 0.15)
-    watermark_x = getattr(job, 'watermark_x', None)
-    watermark_y = getattr(job, 'watermark_y', None)
-
-    return _upload_service.apply_watermark_to_video(
-        video_path=video_path,
-        watermark_path=watermark_path,
-        position=position,
-        opacity=opacity,
-        scale=scale,
-        watermark_x=watermark_x,
-        watermark_y=watermark_y,
-        log_fn=log_fn,
-        run_subprocess_fn=run_subprocess,
-        notification_system=NotificationSystem,
-        page_name=job.page_name,
-        watermark_ffmpeg_timeout=WATERMARK_FFMPEG_TIMEOUT,
-        watermark_min_output_ratio=WATERMARK_MIN_OUTPUT_RATIO,
-        watermark_file_close_delay=WATERMARK_FILE_CLOSE_DELAY
-    )
-
-
-def cleanup_temp_watermark_file(video_path: str, original_path: str, log_fn=None):
-    """
-    حذف ملف الفيديو المؤقت بعد الرفع إذا كان مختلفاً عن الأصلي بشكل آمن.
-    Delete temporary video file after upload if different from original.
-
-    المعاملات:
-        video_path: مسار الفيديو المستخدم (قد يكون مؤقتاً) - Video path used (may be temporary)
-        original_path: مسار الفيديو الأصلي - Original video path
-        log_fn: دالة التسجيل - Logging function
-    """
-    _upload_service.cleanup_temp_watermark_file(
-        video_path=video_path,
-        original_path=original_path,
-        log_fn=log_fn,
-        watermark_cleanup_delay=WATERMARK_CLEANUP_DELAY
-    )
-
-
-def upload_video_once(page_job: PageJob, video_path, token, ui_signals: UiSignals,
-                      title_tmpl, desc_tmpl, log_fn):
-    """
-    رفع فيديو واحد إلى فيسبوك مع دعم العلامة المائية.
-
-    هذه الدالة محمية من الأخطاء لمنع crash البرنامج.
-    """
-    endpoint = f'https://graph-video.facebook.com/v17.0/{page_job.page_id}/videos'
-    folder = Path(page_job.folder)
-
-    # متغيرات للتتبع
-    original_video_path = video_path
-    video_path_to_upload = video_path
-
-    try:
-        # الحصول على قائمة الملفات
-        try:
-            files_all = sorted([p for p in folder.iterdir()
-                                if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS])
-        except Exception:
-            files_all = [Path(video_path)]
-
-        filename = os.path.basename(video_path)
-        idx = files_all.index(Path(video_path)) if Path(video_path) in files_all else 0
-
-        # تنظيف اسم الملف تلقائياً (داخلياً)
-        original_name = os.path.splitext(filename)[0]
-        display_filename = clean_filename_for_title(filename)
-        # Problem 1 fix: إزالة رسالة السجل الزائدة
-        # if display_filename != original_name:
-        #     log_fn(f'🧹 تم تنظيف العنوان: "{original_name}" -> "{display_filename}"')
-
-        title = display_filename if page_job.use_filename_as_title else apply_template(title_tmpl, page_job, display_filename, idx + 1, len(files_all))
-        description = apply_template(desc_tmpl, page_job, display_filename, idx + 1, len(files_all))
-        # Problem 1 fix: إزالة رسالة السجل الزائدة
-        # log_fn(f'رفع بسيط: {filename} -> {page_job.page_name} عنوان="{title}"')
-
-        # تطبيق العلامة المائية إذا كانت مفعلة
-        try:
-            video_path_to_upload = apply_watermark_to_video(video_path, page_job, log_fn)
-        except Exception as wm_error:
-            log_fn(f'⚠️ خطأ في العلامة المائية: {wm_error}')
-            video_path_to_upload = video_path  # استخدام الفيديو الأصلي
-
-        # محاولة الرفع البسيط
-        try:
-            with open(video_path_to_upload, 'rb') as f:
-                data = {
-                    'access_token': token,
-                    'title': title,
-                    'description': description,
-                    'published': 'true'
-                }
-                r = requests.post(endpoint, data=data, files={'source': (filename, f, 'video/mp4')}, timeout=300)
-        except Exception as e:
-            log_fn(f'خطأ رفع بسيط: {e}')
-            try:
-                size = os.path.getsize(original_video_path)
-            except Exception:
-                size = 0
-
-            if size >= RESUMABLE_THRESHOLD_BYTES:
-                log_fn('تحويل للمجزأ بسبب الحجم.')
-                # استخدام الفيديو مع العلامة المائية إذا كان موجوداً
-                try:
-                    result = resumable_upload(page_job, video_path_to_upload, token, ui_signals, title, description)
-                    return result
-                except Exception as res_error:
-                    log_fn(f'❌ خطأ في الرفع المجزأ: {res_error}')
-                    return None, {'error': 'resumable_exception', 'detail': str(res_error)}
-            return None, {'error': 'simple_exception', 'detail': str(e)}
-
-        status = getattr(r, 'status_code', None)
-        try:
-            body = r.json()
-        except Exception:
-            body = r.text
-
-        # التحقق من الحاجة للرفع المجزأ
-        try:
-            file_size = os.path.getsize(video_path_to_upload) if os.path.exists(video_path_to_upload) else 0
-        except Exception:
-            file_size = 0
-
-        if status == 413 or (isinstance(body, dict) and body.get('error', {}).get('code') == 413) \
-           or file_size >= RESUMABLE_THRESHOLD_BYTES:
-            log_fn('تحويل للمجزأ (413 أو الحجم).')
-            try:
-                result = resumable_upload(page_job, video_path_to_upload, token, ui_signals, title, description)
-                return result
-            except Exception as res_error:
-                log_fn(f'❌ خطأ في الرفع المجزأ: {res_error}')
-                return None, {'error': 'resumable_exception', 'detail': str(res_error)}
-
-        try:
-            ui_signals.progress_signal.emit(100, 'تم الرفع البسيط 100%')
-        except Exception:
-            pass  # تجاهل أخطاء إرسال الإشارة
-
-        log_fn(f'نتيجة الرفع البسيط ({status}): {body}')
-        return status, body
-
-    except Exception as e:
-        # التقاط أي خطأ غير متوقع
-        log_fn(f'❌ خطأ غير متوقع في عملية الرفع: {e}')
-        try:
-            from controllers.story_controller import log_error_to_file
-            log_error_to_file(e, f'Unexpected error in upload_video_once: {video_path}')
-        except Exception:
-            pass
-        return None, {'error': 'unexpected_exception', 'detail': str(e)}
-
-    finally:
-        # تنظيف الملف المؤقت بشكل آمن (دائماً يتم تنفيذه)
-        try:
-            cleanup_temp_watermark_file(video_path_to_upload, original_video_path, log_fn)
-        except Exception as cleanup_error:
-            # تجاهل أي خطأ في التنظيف لمنع crash
-            try:
-                log_fn(f'⚠️ خطأ في تنظيف الملف المؤقت: {cleanup_error}')
-            except Exception:
-                pass
 # ==================== Hashtag Manager Dialog ====================
 
 # ==================== Hashtag Manager Dialog ====================
