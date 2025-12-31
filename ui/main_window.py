@@ -130,7 +130,7 @@ from controllers import VideoController, StoryController, ReelsController, Sched
 from ui.panels import DraggablePreviewLabel, WatermarkPreviewDialog, StoryPanel, PagesPanel
 
 # استيراد التبويبات - Import Tabs
-from ui.tabs import SettingsTab, StatsTab
+from ui.tabs import SettingsTab
 
 # استيراد إشارات الواجهة - Import UI signals
 from ui.signals import UiSignals
@@ -1091,7 +1091,6 @@ class MainWindow(QMainWindow):
         self.settings_tab.telegram_test_result.connect(self._update_telegram_test_result)
         self.settings_tab.update_check_finished.connect(self._finish_update_check)
         # Connect update button to run updates
-        self.settings_tab.update_all_btn.clicked.disconnect()  # Disconnect the default handler
         self.settings_tab.update_all_btn.clicked.connect(self._run_updates_from_tab)
         
         # Load settings into settings tab
@@ -3125,140 +3124,6 @@ class MainWindow(QMainWindow):
 
             # تحديث الشفافية
             self.job_watermark_opacity_slider.setValue(int(settings['opacity'] * 100))
-
-    def _build_stats_tab(self, layout):
-        """بناء تبويب الإحصائيات."""
-        stats_group = QGroupBox('إحصائيات الرفع')
-        stats_form = QFormLayout()
-
-        # إحصائيات عامة
-        self.stats_total_label = QLabel('0')
-        stats_form.addRow('إجمالي الرفع:', self.stats_total_label)
-
-        self.stats_success_label = QLabel('0')
-        stats_form.addRow('الناجحة:', self.stats_success_label)
-
-        self.stats_failed_label = QLabel('0')
-        stats_form.addRow('الفاشلة:', self.stats_failed_label)
-
-        # معدل النجاح
-        self.stats_success_rate_label = QLabel('0%')
-        stats_form.addRow('معدل النجاح:', self.stats_success_rate_label)
-
-        stats_group.setLayout(stats_form)
-        layout.addWidget(stats_group)
-
-        # الرسم البياني الأسبوعي
-        weekly_group = QGroupBox('الإحصائيات الأسبوعية')
-        if HAS_QTAWESOME:
-            weekly_group.setTitle('')
-        weekly_layout = QVBoxLayout()
-
-        # عنوان المجموعة مع أيقونة
-        if HAS_QTAWESOME:
-            weekly_title_row = QHBoxLayout()
-            weekly_icon_label = QLabel()
-            weekly_icon_label.setPixmap(get_icon(ICONS['chart'], ICON_COLORS.get('chart')).pixmap(16, 16))
-            weekly_title_row.addWidget(weekly_icon_label)
-            weekly_title_row.addWidget(QLabel('الإحصائيات الأسبوعية'))
-            weekly_title_row.addStretch()
-            weekly_layout.addLayout(weekly_title_row)
-
-        self.weekly_chart_text = QTextEdit()
-        self.weekly_chart_text.setReadOnly(True)
-        self.weekly_chart_text.setMaximumHeight(200)
-        self.weekly_chart_text.setStyleSheet('font-family: monospace; font-size: 12px;')
-        weekly_layout.addWidget(self.weekly_chart_text)
-
-        weekly_group.setLayout(weekly_layout)
-        layout.addWidget(weekly_group)
-
-        # جدول آخر الرفع
-        recent_group = QGroupBox('آخر الفيديوهات المرفوعة')
-        recent_layout = QVBoxLayout()
-
-        self.recent_uploads_table = QTableWidget()
-        self.recent_uploads_table.setColumnCount(4)
-        self.recent_uploads_table.setHorizontalHeaderLabels(['الملف', 'الصفحة', 'التاريخ', 'الحالة'])
-        self.recent_uploads_table.horizontalHeader().setStretchLastSection(True)
-        self.recent_uploads_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        recent_layout.addWidget(self.recent_uploads_table)
-
-        # صف الأزرار (تحديث وتصفير)
-        buttons_row = QHBoxLayout()
-
-        refresh_btn = create_icon_button('تحديث الإحصائيات', 'refresh')
-        refresh_btn.clicked.connect(self._refresh_stats)
-        buttons_row.addWidget(refresh_btn)
-
-        reset_btn = create_icon_button('تصفير الإحصائيات', 'delete')
-        reset_btn.clicked.connect(self._reset_stats)
-        buttons_row.addWidget(reset_btn)
-
-        recent_layout.addLayout(buttons_row)
-
-        recent_group.setLayout(recent_layout)
-        layout.addWidget(recent_group)
-
-        layout.addStretch()
-
-    def _refresh_stats(self):
-        """تحديث الإحصائيات من قاعدة البيانات."""
-        stats = get_upload_stats(days=30)
-
-        self.stats_total_label.setText(str(stats.get('total', 0)))
-        self.stats_success_label.setText(str(stats.get('successful', 0)))
-        self.stats_failed_label.setText(str(stats.get('failed', 0)))
-
-        # معدل النجاح
-        success_rate = stats.get('success_rate', 0)
-        self.stats_success_rate_label.setText(f'{success_rate:.1f}%')
-
-        # الرسم البياني الأسبوعي
-        weekly_stats = stats.get('weekly_stats', {})
-        if weekly_stats:
-            chart = generate_text_chart(weekly_stats)
-            self.weekly_chart_text.setText(chart)
-        else:
-            self.weekly_chart_text.setText('لا توجد بيانات للأسبوع الماضي')
-
-        # تحديث جدول آخر الرفع
-        recent = stats.get('recent', [])
-        self.recent_uploads_table.setRowCount(len(recent))
-
-        for row, item in enumerate(recent):
-            file_name, page_name, video_url, uploaded_at, status = item
-            self.recent_uploads_table.setItem(row, 0, QTableWidgetItem(file_name or ''))
-            self.recent_uploads_table.setItem(row, 1, QTableWidgetItem(page_name or ''))
-            self.recent_uploads_table.setItem(row, 2, QTableWidgetItem(uploaded_at or ''))
-            status_text = '✅ نجح' if status == 'success' else '❌ فشل'
-            self.recent_uploads_table.setItem(row, 3, QTableWidgetItem(status_text))
-
-    def _reset_stats(self):
-        """تصفير الإحصائيات بعد تأكيد المستخدم."""
-        reply = QMessageBox.question(
-            self,
-            'تأكيد التصفير',
-            'هل أنت متأكد من تصفير جميع الإحصائيات؟\nلا يمكن التراجع عن هذا الإجراء.',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
-            # تشغيل العملية في خيط منفصل لمنع تجميد الواجهة
-            def do_reset():
-                try:
-                    if reset_upload_stats():
-                        # استخدام signal لتحديث الواجهة من الخيط الرئيسي
-                        self.ui_signals.log_signal.emit('✅ تم تصفير الإحصائيات بنجاح')
-                        # تأخير قصير ثم تحديث العرض
-                        QTimer.singleShot(100, self._refresh_stats)
-                    else:
-                        self.ui_signals.log_signal.emit('❌ فشل تصفير الإحصائيات')
-                except Exception as e:
-                    self.ui_signals.log_signal.emit(f'❌ خطأ: {e}')
-
-            threading.Thread(target=do_reset, daemon=True).start()
 
     def _run_updates_from_tab(self):
         """Run updates requested from settings tab"""

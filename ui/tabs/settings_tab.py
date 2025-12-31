@@ -264,7 +264,7 @@ class SettingsTab(QWidget):
         update_buttons_row.addWidget(self.check_updates_btn)
         
         self.update_all_btn = create_icon_button('تحديث الكل', 'update', color=COUNTDOWN_COLOR_GREEN)
-        self.update_all_btn.clicked.connect(self._on_update_requested)
+        # Note: update_all_btn signal will be connected by parent (MainWindow)
         self.update_all_btn.setVisible(False)  # يظهر فقط عند وجود تحديثات
         self.update_all_btn.setStyleSheet(f'background-color: {COUNTDOWN_COLOR_GREEN}; color: white; font-weight: bold;')
         update_buttons_row.addWidget(self.update_all_btn)
@@ -519,11 +519,6 @@ class SettingsTab(QWidget):
             self.check_updates_btn.setText('البحث عن تحديثات')
             if HAS_QTAWESOME:
                 self.check_updates_btn.setIcon(get_icon(ICONS.get('search', 'fa5s.search'), ICON_COLORS.get('search')))
-    
-    def _on_update_requested(self):
-        """Signal that updates are requested - parent will handle the actual update"""
-        # This signal will be connected by the parent to trigger the actual update process
-        pass
     
     # Getters and setters for settings values
     def get_settings(self) -> dict:
