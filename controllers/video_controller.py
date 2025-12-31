@@ -304,6 +304,11 @@ class VideoJob(BaseJob):
         return obj
 
 
+# Backward compatibility alias for code that imports PageJob
+# PageJob was the original name used in scheduler_ui.py and other modules
+PageJob = VideoJob
+
+
 def get_video_files(folder_path: str, sort_by: str = 'name') -> list:
     """
     الحصول على قائمة ملفات الفيديو من مجلد معين.

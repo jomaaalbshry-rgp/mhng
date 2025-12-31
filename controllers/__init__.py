@@ -12,7 +12,7 @@ from .scheduler_controller import SchedulerController
 # Export Job classes and utility functions from controllers
 # For backward compatibility with code that imports directly
 from .video_controller import (
-    VideoJob, get_video_files, count_video_files,
+    VideoJob, PageJob, get_video_files, count_video_files,
     validate_video_file, upload_video, upload_video_with_retry,
     is_upload_successful, log_error_to_file as log_video_error
 )
@@ -36,6 +36,7 @@ __all__ = [
     'SchedulerController',
     # Job classes
     'VideoJob',
+    'PageJob',  # Backward compatibility alias for VideoJob
     'StoryJob',
     'ReelsJob',
     # Utility functions
