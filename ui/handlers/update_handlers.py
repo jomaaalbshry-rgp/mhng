@@ -108,4 +108,5 @@ class UpdateHandlers:
         packages_to_update = [name for name, _, _ in update_info]
         # Future implementation: use create_update_script and run_update_and_restart
         # from core.updater_utils
-        pass
+        log_info(f"Update requested for packages: {packages_to_update}")
+        raise NotImplementedError("Update installation not yet implemented in handlers")
