@@ -27,15 +27,16 @@ class TokenManagementDialog(QDialog):
                  get_all_app_tokens_func=None,
                  save_app_token_func=None,
                  delete_app_token_func=None):
+        # التحقق من تمرير جميع الدوال المطلوبة قبل التهيئة
+        if not get_all_app_tokens_func or not save_app_token_func or not delete_app_token_func:
+            raise ValueError("يجب تمرير جميع الدوال المطلوبة: get_all_app_tokens_func, save_app_token_func, delete_app_token_func")
+        
         super().__init__(parent)
         self.setWindowTitle('🔑 إدارة التوكينات')
         self.setMinimumSize(700, 500)
         self._apps = []  # قائمة التطبيقات المحلية
         
         # حفظ الدوال الممررة
-        if not get_all_app_tokens_func or not save_app_token_func or not delete_app_token_func:
-            raise ValueError("يجب تمرير جميع الدوال المطلوبة: get_all_app_tokens_func, save_app_token_func, delete_app_token_func")
-            
         self._get_all_app_tokens = get_all_app_tokens_func
         self._save_app_token = save_app_token_func
         self._delete_app_token = delete_app_token_func

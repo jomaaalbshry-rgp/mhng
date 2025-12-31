@@ -17,6 +17,7 @@ from services import (
     get_all_templates, save_template, 
     delete_template, set_default_template
 )
+# استيراد ALL_WEEKDAYS_STR مباشرة (غير مصدر من services/__init__.py)
 from services.data_access import ALL_WEEKDAYS_STR
 
 # استيراد من ui.widgets
