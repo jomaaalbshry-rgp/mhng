@@ -552,9 +552,6 @@ def log_error_to_file(error, extra_info=None):
             f.write(f'Error: {error}\n')
             f.write(f'Traceback:\n{tb_str}\n')
             f.write(f'{"=" * 80}\n')
-        
-        # Also log at debug level to avoid redundant error logs
-        log_debug(f"Error details saved to {log_file.name}: {error}", extra_info)
     except Exception as log_err:
         # If logging fails, print to stderr to avoid silent failures
         print(f'Failed to log error to file: {log_err}', file=sys.stderr)

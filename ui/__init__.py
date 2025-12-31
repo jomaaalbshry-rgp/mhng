@@ -3,6 +3,8 @@
 User Interface module
 """
 
+import sys
+
 # تأخير استيراد MainWindow لتجنب circular import مع المجدولات
 # Delay MainWindow import to avoid circular import with schedulers
 # from .main_window import MainWindow
@@ -41,7 +43,6 @@ def __getattr__(name):
             return MainWindow
         except ImportError as e:
             # Log import error and re-raise with context
-            import sys
             print(f"Failed to import MainWindow: {e}", file=sys.stderr)
             raise
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
