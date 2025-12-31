@@ -12,10 +12,6 @@ from .token_manager import (
     TokenExchangeWorker, AllPagesFetchWorker, get_token_manager
 )
 from .updater import *
-from .upload_helpers import (
-    resumable_upload, apply_watermark_to_video,
-    cleanup_temp_watermark_file, upload_video_once
-)
 
 # استيراد وحدة الوصول إلى البيانات - Import data access module
 from .data_access import (
@@ -28,6 +24,23 @@ from .data_access import (
     get_default_template, set_default_template, get_schedule_times_for_template,
     migrate_json_to_sqlite
 )
+
+# تأخير استيراد upload_helpers لتجنب circular import
+# Delay upload_helpers import to avoid circular import using lazy imports
+_upload_helpers_cache = {}
+
+def __getattr__(name):
+    """استيراد مؤجل للدوال من upload_helpers - Lazy import for upload_helpers functions"""
+    if name in ('resumable_upload', 'apply_watermark_to_video', 
+                'cleanup_temp_watermark_file', 'upload_video_once'):
+        if name not in _upload_helpers_cache:
+            from . import upload_helpers
+            _upload_helpers_cache['resumable_upload'] = upload_helpers.resumable_upload
+            _upload_helpers_cache['apply_watermark_to_video'] = upload_helpers.apply_watermark_to_video
+            _upload_helpers_cache['cleanup_temp_watermark_file'] = upload_helpers.cleanup_temp_watermark_file
+            _upload_helpers_cache['upload_video_once'] = upload_helpers.upload_video_once
+        return _upload_helpers_cache[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 # تصدير الخدمات - Export services
 __all__ = [

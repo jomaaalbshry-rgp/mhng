@@ -29,6 +29,7 @@ from core import (
     APIUsageTracker, APIWarningSystem, get_api_tracker, get_api_warning_system,
     API_CALLS_PER_STORY
 )
+from core.video_utils import get_random_emoji
 
 from PySide6.QtCore import Signal, Slot, QObject, QThread
 
@@ -98,17 +99,6 @@ def log_error_to_file(error, extra_info=None):
             f.write(f'التتبع:\n{tb_str}\n')
     except Exception:
         pass  # تجاهل أخطاء التسجيل
-
-
-def get_random_emoji() -> str:
-    """
-    إرجاع إيموجي عشوائي من قائمة محددة.
-    
-    العائد:
-        إيموجي عشوائي
-    """
-    emojis = ["🔥", "❤️", "💯", "✨", "🎉", "👍", "💪", "🌟", "😍", "🎊"]
-    return random.choice(emojis)
 
 
 def get_random_delay(min_delay: int = DEFAULT_RANDOM_DELAY_MIN, 

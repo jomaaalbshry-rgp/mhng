@@ -67,7 +67,8 @@ from .utils import (
 from .job_keys import make_job_key, get_job_key
 from .video_utils import (
     validate_video, clean_filename_for_title, calculate_jitter_interval,
-    sort_video_files, apply_template, TITLE_CLEANUP_WORDS, TITLE_CLEANUP_PATTERNS
+    sort_video_files, apply_template, get_random_emoji, 
+    TITLE_CLEANUP_WORDS, TITLE_CLEANUP_PATTERNS
 )
 from .updater_utils import (
     check_for_updates, get_installed_versions, create_update_script,
@@ -174,6 +175,7 @@ __all__ = [
     'calculate_jitter_interval',
     'sort_video_files',
     'apply_template',
+    'get_random_emoji',
     'TITLE_CLEANUP_WORDS',
     'TITLE_CLEANUP_PATTERNS',
     # Updater utils
