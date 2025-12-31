@@ -511,11 +511,22 @@ def log_error_to_file(error, extra_info=None):
         logs_dir = _get_logs_directory()
         log_file = logs_dir / f'error_{datetime.now().strftime("%Y%m%d")}.log'
         
+        # Get traceback information
         exc_info = sys.exc_info()
-        if exc_info[0] is not None:
+        has_exception_context = exc_info[0] is not None
+        
+        if has_exception_context:
+            # We're in an exception handler, get the full traceback
             tb_str = ''.join(traceback.format_exception(*exc_info))
+        elif isinstance(error, BaseException):
+            # Error is an Exception object but we're not in exception context
+            # Format the exception type and message
+            tb_str = f'{type(error).__name__}: {error}\n'
+            if hasattr(error, '__traceback__') and error.__traceback__:
+                tb_str += ''.join(traceback.format_tb(error.__traceback__))
         else:
-            tb_str = traceback.format_exc()
+            # Error is a string or other type
+            tb_str = str(error)
         
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open(log_file, 'a', encoding='utf-8') as f:
@@ -528,7 +539,8 @@ def log_error_to_file(error, extra_info=None):
             f.write(f'{"=" * 80}\n')
         
         # Also log using the unified logger
-        log_error(f"Error logged to file: {error}", extra_info, exc_info=True)
+        # Only pass exc_info=True if we're actually in an exception context
+        log_error(f"Error logged to file: {error}", extra_info, exc_info=has_exception_context)
     except Exception as log_err:
         # If logging fails, print to stderr to avoid silent failures
         print(f'Failed to log error to file: {log_err}', file=sys.stderr)
