@@ -35,6 +35,8 @@ def __getattr__(name):
     """Lazy loading for MainWindow to avoid circular import"""
     if name == 'MainWindow':
         from .main_window import MainWindow
+        # Cache the import in module globals to avoid repeated imports
+        globals()['MainWindow'] = MainWindow
         return MainWindow
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
