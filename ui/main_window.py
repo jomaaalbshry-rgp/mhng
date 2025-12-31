@@ -62,7 +62,13 @@ from core import (
     get_resource_path, get_subprocess_args, run_subprocess, create_popen, SmartUploadScheduler,
     APIUsageTracker, APIWarningSystem, get_api_tracker, get_api_warning_system,
     API_CALLS_PER_STORY, get_date_placeholder, apply_title_placeholders,
-    make_job_key, get_job_key
+    make_job_key, get_job_key,
+    # Video utils
+    validate_video, clean_filename_for_title, calculate_jitter_interval,
+    sort_video_files, apply_template,
+    # Updater utils
+    check_for_updates, get_installed_versions, create_update_script,
+    run_update_and_restart, UPDATE_PACKAGES
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QTime, QThread
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QBrush, QFont, QFontMetrics, QTextCursor
@@ -346,438 +352,6 @@ def wait_for_internet(log_fn=None, check_interval: int = 60, max_attempts: int =
 
         _log(f'📶 لا يوجد اتصال بالإنترنت - المحاولة {attempts} - الانتظار {check_interval} ثانية...')
         time.sleep(check_interval)
-
-
-# ==================== Library Update System ====================
-
-# قائمة المكتبات التي نتحقق من تحديثاتها
-UPDATE_PACKAGES = ['requests', 'PySide6', 'pyqtdarktheme', 'qtawesome']
-
-
-def _get_subprocess_windows_args() -> tuple:
-    """
-    الحصول على معاملات subprocess لإخفاء نافذة Console على Windows.
-
-    العائد:
-        tuple: (startupinfo, creationflags)
-    """
-    startupinfo = None
-    creationflags = 0
-    if sys.platform == 'win32':
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        creationflags = subprocess.CREATE_NO_WINDOW
-    return startupinfo, creationflags
-
-
-def check_for_updates(log_fn=None) -> list:
-    """
-    التحقق من وجود تحديثات للمكتبات.
-
-    العائد:
-        قائمة بالمكتبات التي تحتاج تحديث: [(name, current_version, latest_version), ...]
-    """
-    updates = []
-    packages_lower = [p.lower() for p in UPDATE_PACKAGES]
-
-    try:
-        # إخفاء نافذة الـ Console على Windows
-        startupinfo, creationflags = _get_subprocess_windows_args()
-
-        # الحصول على قائمة المكتبات القديمة
-        result = subprocess.run(
-            [sys.executable, '-m', 'pip', 'list', '--outdated', '--format=json'],
-            capture_output=True,
-            text=True,
-            timeout=30,  # تقليل من 60 إلى 30
-            startupinfo=startupinfo,
-            creationflags=creationflags
-        )
-
-        if result.returncode == 0 and result.stdout.strip():
-            try:
-                outdated = json.loads(result.stdout)
-                for pkg in outdated:
-                    if pkg.get('name', '').lower() in packages_lower:
-                        updates.append((
-                            pkg.get('name'),
-                            pkg.get('version'),
-                            pkg.get('latest_version')
-                        ))
-            except json.JSONDecodeError:
-                pass
-    except subprocess.TimeoutExpired:
-        if log_fn:
-            log_fn('⚠️ انتهت مهلة التحقق من التحديثات')
-    except Exception as e:
-        if log_fn:
-            log_fn(f'❌ خطأ في التحقق من التحديثات: {e}')
-
-    return updates
-
-
-def get_installed_versions() -> dict:
-    """الحصول على إصدارات المكتبات المثبتة."""
-    versions = {}
-
-    try:
-        # إخفاء نافذة الـ Console على Windows
-        startupinfo, creationflags = _get_subprocess_windows_args()
-
-        result = subprocess.run(
-            [sys.executable, '-m', 'pip', 'list', '--format=json'],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            startupinfo=startupinfo,
-            creationflags=creationflags
-        )
-
-        if result.returncode == 0:
-            installed = json.loads(result.stdout)
-
-            for pkg in installed:
-                if pkg['name'].lower() in [p.lower() for p in UPDATE_PACKAGES]:
-                    versions[pkg['name']] = pkg['version']
-    except Exception:
-        pass
-
-    return versions
-
-
-def _validate_package_name(package_name: str) -> bool:
-    """
-    Validate package name to prevent command injection.
-    التحقق من صحة اسم الحزمة لمنع حقن الأوامر.
-
-    Args:
-        package_name: Package name to validate
-
-    Returns:
-        True if valid, False otherwise
-    """
-    # Package names should only contain alphanumeric, hyphen, underscore, dot
-    # Hyphen at end of character class to avoid escaping
-    pattern = r'^[a-zA-Z0-9_.]+[a-zA-Z0-9_.-]*$'
-    return bool(re.match(pattern, package_name))
-
-
-def create_update_script(packages_to_update: list) -> str:
-    """
-    Create temporary update script.
-    إنشاء سكربت التحديث المؤقت.
-
-    Args:
-        packages_to_update: List of package names to update
-
-    Returns:
-        Path to temporary script
-    """
-    # Validate all package names to prevent command injection
-    for pkg in packages_to_update:
-        if not _validate_package_name(pkg):
-            raise ValueError(f"Invalid package name: {pkg}")
-
-    # Only allow packages from our whitelist
-    allowed_packages = [p.lower() for p in UPDATE_PACKAGES]
-    validated_packages = [pkg for pkg in packages_to_update if pkg.lower() in allowed_packages]
-
-    if not validated_packages:
-        raise ValueError("No valid packages to update")
-
-    packages_str = ' '.join(validated_packages)
-    python_path = sys.executable
-    script_path = os.path.abspath(sys.argv[0])
-
-    if sys.platform == 'win32':
-        # Windows batch script
-        script_content = f'''@echo off
-chcp 65001 > nul
-echo.
-echo ══════════════════════════════════════════════════
-echo    جاري تحديث المكتبات - يرجى الانتظار...
-echo ══════════════════════════════════════════════════
-echo.
-timeout /t 3 /nobreak > nul
-"{python_path}" -m pip install --upgrade {packages_str}
-echo.
-echo ══════════════════════════════════════════════════
-echo    ✅ تم التحديث بنجاح!
-echo    جاري إعادة تشغيل البرنامج...
-echo ══════════════════════════════════════════════════
-echo.
-timeout /t 2 /nobreak > nul
-start "" "{python_path}" "{script_path}"
-del "%~f0"
-'''
-        script_file = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.bat', delete=False, encoding='utf-8'
-        )
-    else:
-        # Linux/Mac shell script
-        script_content = f'''#!/bin/bash
-echo ""
-echo "══════════════════════════════════════════════════"
-echo "   جاري تحديث المكتبات - يرجى الانتظار..."
-echo "══════════════════════════════════════════════════"
-echo ""
-sleep 3
-"{python_path}" -m pip install --upgrade {packages_str}
-echo ""
-echo "══════════════════════════════════════════════════"
-echo "   ✅ تم التحديث بنجاح!"
-echo "   جاري إعادة تشغيل البرنامج..."
-echo "══════════════════════════════════════════════════"
-echo ""
-sleep 2
-"{python_path}" "{script_path}" &
-rm -- "$0"
-'''
-        script_file = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.sh', delete=False, encoding='utf-8'
-        )
-
-    script_file.write(script_content)
-    script_file.close()
-
-    # جعل السكربت قابل للتنفيذ على Linux/Mac
-    if sys.platform != 'win32':
-        os.chmod(script_file.name, 0o755)
-
-    return script_file.name
-
-
-def run_update_and_restart(packages_to_update: list):
-    """
-    تشغيل سكربت التحديث وإغلاق البرنامج.
-    """
-    script_path = create_update_script(packages_to_update)
-
-    if sys.platform == 'win32':
-        # تشغيل السكربت في نافذة جديدة
-        os.startfile(script_path)
-    else:
-        # تشغيل السكربت في الخلفية
-        subprocess.Popen(['bash', script_path], start_new_session=True)
-
-    # إغلاق البرنامج
-    sys.exit(0)
-
-
-# ==================== Title Cleaner ====================
-
-# كلمات يجب إزالتها من أسماء الملفات (lowercase فقط - المقارنة تتم بـ case-insensitive)
-TITLE_CLEANUP_WORDS = [
-    'hd', 'fhd', 'uhd', 'sd', '4k', '8k', '1080p', '720p', '480p', '360p', '240p',
-    'mp4', 'mov', 'avi', 'mkv', 'wmv', 'flv', 'webm',
-    'copyright', 'free', 'no copyright', 'royalty free', 'ncs', 'nocopyright',
-    'official', 'video', 'clip', 'music', 'audio', 'lyrics', 'lyric',
-    'download', 'full', 'complete', 'final', 'version', 'edit', 'remix',
-    'www', 'http', 'https', 'com', 'net', 'org',
-    'hq', 'lq', 'high quality', 'low quality',
-]
-
-# أنماط regex للتنظيف
-TITLE_CLEANUP_PATTERNS = [
-    r'\[.*?\]',           # إزالة النص بين الأقواس المربعة [...]
-    r'\(.*?\)',           # إزالة النص بين الأقواس الدائرية (...)
-    r'\{.*?\}',           # إزالة النص بين الأقواس المعقوصة {...}
-    r'@\w+',              # إزالة mentions
-    r'#\w+',              # إزالة hashtags من الاسم
-    r'https?://\S+',      # إزالة الروابط
-    r'\b\d{3,4}p\b',      # إزالة الدقة مثل 1080p, 720p
-    r'\b[Hh][Dd]\b',      # إزالة HD
-    r'\b[4-8][Kk]\b',     # إزالة 4K, 8K
-    r'\b(19|20)\d{2}\b',  # إزالة السنوات (1900-2099)
-]
-
-
-def clean_filename_for_title(filename: str, remove_extension: bool = True) -> str:
-    """
-    تنظيف اسم الملف لاستخدامه كعنوان.
-
-    المعاملات:
-        filename: اسم الملف الأصلي
-        remove_extension: إزالة امتداد الملف
-
-    العائد:
-        اسم الملف المُنظّف والمقروء
-    """
-    if not filename:
-        return filename
-
-    title = filename
-
-    # إزالة الامتداد إذا طُلب
-    if remove_extension:
-        title = os.path.splitext(title)[0]
-
-    # استبدال الرموز بمسافات
-    title = title.replace('_', ' ')
-    title = title.replace('-', ' ')
-    title = title.replace('.', ' ')
-    title = title.replace('+', ' ')
-    title = title.replace('~', ' ')
-
-    # تطبيق أنماط regex
-    for pattern in TITLE_CLEANUP_PATTERNS:
-        title = re.sub(pattern, '', title, flags=re.IGNORECASE)
-
-    # إزالة الكلمات غير المرغوبة (TITLE_CLEANUP_WORDS already lowercase)
-    words = title.split()
-    cleaned_words = []
-    for word in words:
-        word_lower = word.lower().strip()
-        # تحقق من الكلمات الكاملة فقط
-        if word_lower not in TITLE_CLEANUP_WORDS:
-            cleaned_words.append(word)
-
-    title = ' '.join(cleaned_words)
-
-    # إزالة المسافات المتعددة
-    title = re.sub(r'\s+', ' ', title)
-
-    # إزالة المسافات من البداية والنهاية
-    title = title.strip()
-
-    # تحويل الحرف الأول إلى حرف كبير
-    if title:
-        title = title[0].upper() + title[1:] if len(title) > 1 else title.upper()
-
-    return title
-
-
-# ==================== Random Jitter (Anti-Ban) ====================
-
-def calculate_jitter_interval(base_interval: int, jitter_percent: int = 10) -> int:
-    """
-    حساب الفاصل الزمني مع نطاق عشوائي لمحاكاة السلوك البشري.
-
-    المعاملات:
-        base_interval: الفاصل الزمني الأساسي بالثواني
-        jitter_percent: نسبة التباين المئوية (مثلاً 10 = ±10%)
-
-    العائد:
-        الفاصل الزمني مع التباين العشوائي
-    """
-    if jitter_percent <= 0:
-        return base_interval
-
-    # حساب نطاق التباين
-    variation = int(base_interval * jitter_percent / 100)
-
-    # إنشاء قيمة عشوائية ضمن النطاق
-    jitter = random.randint(-variation, variation)
-
-    # التأكد من أن النتيجة إيجابية (حد أدنى 10 ثواني)
-    return max(10, base_interval + jitter)
-
-
-# ==================== Video Sorting ====================
-
-def sort_video_files(files: list, sort_by: str = 'name', reverse: bool = False) -> list:
-    """
-    ترتيب ملفات الفيديو حسب المعيار المحدد.
-
-    المعاملات:
-        files: قائمة مسارات الملفات (Path objects)
-        sort_by: معيار الترتيب ('name', 'random', 'date_created', 'date_modified')
-        reverse: عكس الترتيب
-
-    العائد:
-        القائمة المرتبة
-    """
-    if not files:
-        return files
-
-    if sort_by == 'random':
-        # ترتيب عشوائي
-        shuffled = list(files)
-        random.shuffle(shuffled)
-        return shuffled
-
-    elif sort_by == 'date_created':
-        # ترتيب حسب تاريخ الإنشاء
-        try:
-            return sorted(files, key=lambda f: f.stat().st_ctime, reverse=reverse)
-        except Exception:
-            return sorted(files, key=lambda f: f.name.lower(), reverse=reverse)
-
-    elif sort_by == 'date_modified':
-        # ترتيب حسب تاريخ التعديل
-        try:
-            return sorted(files, key=lambda f: f.stat().st_mtime, reverse=reverse)
-        except Exception:
-            return sorted(files, key=lambda f: f.name.lower(), reverse=reverse)
-
-    else:
-        # الافتراضي: ترتيب أبجدي
-        return sorted(files, key=lambda f: f.name.lower(), reverse=reverse)
-
-
-# ==================== Video Validation ====================
-
-def validate_video(video_path: str, log_fn=None) -> dict:
-    """
-    التحقق من صحة ملف الفيديو قبل الرفع.
-
-    المعاملات:
-        video_path: مسار ملف الفيديو
-        log_fn: دالة للتسجيل
-
-    العائد:
-        dict يحتوي على:
-        - valid: bool - هل الملف صالح
-        - duration: float - مدة الفيديو بالثواني
-        - error: str - رسالة الخطأ إن وجدت
-    """
-    def _log(msg):
-        if log_fn:
-            log_fn(msg)
-
-    result = {'valid': False, 'duration': 0, 'error': None}
-
-    if not os.path.exists(video_path):
-        result['error'] = 'الملف غير موجود'
-        return result
-
-    # التحقق من حجم الملف
-    file_size = os.path.getsize(video_path)
-    if file_size == 0:
-        result['error'] = 'الملف فارغ'
-        return result
-
-    # محاولة استخدام ffprobe للتحقق من الفيديو
-    try:
-        cmd = [
-            'ffprobe', '-v', 'error', '-show_entries',
-            'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
-            video_path
-        ]
-        output = run_subprocess(cmd, timeout=30, text=True)
-
-        if output.returncode == 0 and output.stdout.strip():
-            duration = float(output.stdout.strip())
-            result['valid'] = True
-            result['duration'] = duration
-
-            # التحقق من مدة الفيديو
-            if duration > MAX_VIDEO_DURATION_SECONDS:
-                result['valid'] = False
-                result['error'] = 'مدة الفيديو تتجاوز الحد الأقصى (4 ساعات)'
-        else:
-            result['error'] = 'فشل في قراءة معلومات الفيديو'
-    except FileNotFoundError:
-        # ffprobe غير متوفر، نفترض صلاحية الملف
-        _log('تحذير: ffprobe غير متوفر، تم تخطي التحقق من صحة الفيديو')
-        result['valid'] = True
-    except subprocess.TimeoutExpired:
-        result['error'] = 'انتهت مهلة التحقق من الفيديو'
-    except Exception as e:
-        result['error'] = f'خطأ في التحقق: {str(e)}'
-
-    return result
 
 
 # ==================== Module Initialization ====================
@@ -1136,47 +710,26 @@ def _get_jobs_file() -> Path:
     return get_jobs_file()
 
 
-def apply_template(template_str, page_job: PageJob, filename: str, file_index: int, total_files: int):
-    """
-    تطبيق قالب على النص مع استبدال المتغيرات.
+# ==================== Module Initialization ====================
+# تهيئة قاعدة البيانات عند تحميل الوحدة
+# Database is initialized in admin.py before this module is imported
+# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
+migrate_old_files()
 
-    المتغيرات المدعومة:
-        {filename} - اسم الملف
-        {page_name} - اسم الصفحة
-        {page_id} - معرف الصفحة
-        {index} - رقم الملف الحالي
-        {total} - إجمالي الملفات
-        {datetime} - التاريخ والوقت
-        {date} - التاريخ فقط (YYYY-MM-DD)
-        {date_ymd} - التاريخ (YYYY-MM-DD)
-        {date_dmy} - التاريخ (DD/MM/YYYY)
-        {date_time} - التاريخ والوقت (YYYY-MM-DD HH:MM)
-        {time} - الوقت فقط
-        {day} - اسم اليوم بالعربية
-        {random_emoji} - إيموجي عشوائي
-    """
-    now = datetime.now()
-    days_ar = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
+# Step 1: Run legacy database initialization for other tables
+migrate_json_to_sqlite()
 
-    repl = {
-        'filename': filename,
-        'page_name': page_job.page_name,
-        'page_id': page_job.page_id,
-        'index': file_index,
-        'total': total_files,
-        'datetime': now.strftime('%Y-%m-%d %H:%M:%S'),
-        'date': now.strftime('%Y-%m-%d'),
-        'date_ymd': now.strftime('%Y-%m-%d'),
-        'date_dmy': now.strftime('%d/%m/%Y'),
-        'date_time': now.strftime('%Y-%m-%d %H:%M'),
-        'time': now.strftime('%H:%M'),
-        'day': days_ar[now.weekday()],
-        'random_emoji': get_random_emoji(),
-    }
-    out = template_str or ""
-    for k, v in repl.items():
-        out = out.replace(f'{{{k}}}', str(v))
-    return out
+# Step 2: Run legacy template initialization (for backwards compatibility)
+init_default_templates()  # إنشاء قوالب الجداول الافتراضية
+ensure_default_templates()  # ضمان وجود القوالب الافتراضية (للترقية)
+
+
+# ==================== Notification Systems ====================
+# TelegramNotifier and NotificationSystem have been moved to core/notifications.py
+# They are imported above from core
+
+# مثيل عام لنظام إشعارات Telegram
+telegram_notifier = TelegramNotifier()
 
 
 def move_video_to_uploaded_folder(video_path: str, log_fn=None) -> bool:
