@@ -10,10 +10,12 @@ from .custom_widgets import (
     NoScrollDoubleSpinBox,
     NoScrollSlider,
 )
+from .job_list_item import JobListItemWidget
 
 __all__ = [
     'NoScrollComboBox',
     'NoScrollSpinBox',
     'NoScrollDoubleSpinBox',
     'NoScrollSlider',
+    'JobListItemWidget',
 ]

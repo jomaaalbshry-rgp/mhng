@@ -50,6 +50,7 @@ from .logger import (
     UploadError, NetworkError, APIError, FileError
 )
 from .base_job import BaseJob
+from .jobs import PageJob
 from .utils import (
     get_resource_path, check_internet_connection, wait_for_internet,
     validate_token, get_token_expiry, get_long_lived_token,
@@ -123,6 +124,7 @@ __all__ = [
     'APIError',
     'FileError',
     'BaseJob',
+    'PageJob',
     'get_resource_path',
     'check_internet_connection',
     'wait_for_internet',
