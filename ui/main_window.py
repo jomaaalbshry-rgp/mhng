@@ -97,7 +97,10 @@ from ui.helpers import (
     ICONS, ICON_COLORS, HAS_QTAWESOME,
     # Import formatting functions
     mask_token, seconds_to_value_unit, format_remaining_time,
-    format_time_12h, format_datetime_12h
+    format_time_12h, format_datetime_12h,
+    # Import helper functions (Phase 7 Refactoring)
+    _set_windows_app_id, simple_encrypt, simple_decrypt,
+    check_ffmpeg_available, add_watermark
 )
 from ui.components import JobsTable, LogViewer, LogLevel, ProgressWidget
 
@@ -112,51 +115,7 @@ from ui.scheduler_ui import SchedulerUI
 
 
 
-# ==================== Helper Functions from admin.py ====================
-
-def _set_windows_app_id(app_id: str = "JOMAA.PageManagement.1") -> bool:
-    """
-    تعيين Windows AppUserModelID لجعل إشعارات ويندوز تعرض اسم التطبيق الصحيح.
-    يجب استدعاء هذه الدالة قبل إنشاء QApplication.
-
-    المعاملات:
-        app_id: معرّف فريد للتطبيق (يُستخدم في ويندوز لتمييز التطبيق).
-
-    العائد:
-        True إذا نجح التعيين، False خلاف ذلك.
-    """
-    if sys.platform != 'win32':
-        return False
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-        return True
-    except (AttributeError, OSError):
-        return False
-
-
-# محاولة استيراد qdarktheme
-HAS_QDARKTHEME = False
-QDT_VERSION = ""
-try:
-    import qdarktheme
-    HAS_QDARKTHEME = True
-    try:
-        import importlib.metadata as _imd
-        QDT_VERSION = _imd.version("qdarktheme")
-    except Exception:
-        QDT_VERSION = "unknown"
-except Exception:
-    HAS_QDARKTHEME = False
-
-
-# APP_TITLE and APP_DATA_FOLDER have been moved to core/constants.py
-
-# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
-migrate_old_files()
-
-# ==================== Constants ====================
-# All constants have been moved to core/constants.py
-# They are imported above from core
+# ==================== Constants and Module Initialization ====================
 
 
 # ==================== SQLite Database ====================
@@ -859,135 +818,18 @@ def validate_video(video_path: str, log_fn=None) -> dict:
     return result
 
 
-# ==================== FFmpeg Watermark ====================
-
-def check_ffmpeg_available() -> dict:
-    """
-    التحقق من توفر FFmpeg على النظام.
-
-    العائد:
-        dict يحتوي على:
-        - available: bool - هل FFmpeg متوفر
-        - version: str - إصدار FFmpeg
-        - path: str - مسار FFmpeg
-    """
-    result = {'available': False, 'version': None, 'path': None}
-
-    try:
-        output = run_subprocess(['ffmpeg', '-version'], timeout=10, text=True)
-        if output.returncode == 0:
-            result['available'] = True
-            # استخراج الإصدار من السطر الأول
-            first_line = output.stdout.split('\n')[0]
-            result['version'] = first_line
-
-        # محاولة إيجاد المسار
-        if sys.platform == 'win32':
-            where_output = run_subprocess(['where', 'ffmpeg'], timeout=10, text=True)
-            if where_output.returncode == 0:
-                result['path'] = where_output.stdout.strip().split('\n')[0]
-        else:
-            which_output = run_subprocess(['which', 'ffmpeg'], timeout=10, text=True)
-            if which_output.returncode == 0:
-                result['path'] = which_output.stdout.strip()
-    except FileNotFoundError:
-        result['available'] = False
-    except Exception:
-        pass
-
-    return result
-
-
-def add_watermark(video_path: str, logo_path: str, output_path: str,
-                  position: str = 'bottom_right', opacity: float = 0.8,
-                  progress_callback=None) -> dict:
-    """
-    إضافة علامة مائية على الفيديو باستخدام FFmpeg.
-
-    المعاملات:
-        video_path: مسار الفيديو الأصلي
-        logo_path: مسار ملف الشعار
-        output_path: مسار الفيديو الناتج
-        position: موقع الشعار (top_left, top_right, bottom_left, bottom_right, center)
-        opacity: مستوى الشفافية (0.0 - 1.0)
-        progress_callback: دالة لإظهار التقدم
-
-    العائد:
-        dict يحتوي على نجاح/فشل العملية
-    """
-    result = {'success': False, 'error': None, 'output_path': output_path}
-
-    if not os.path.exists(video_path):
-        result['error'] = 'ملف الفيديو غير موجود'
-        return result
-
-    if not os.path.exists(logo_path):
-        result['error'] = 'ملف الشعار غير موجود'
-        return result
-
-    # تحديد موقع الشعار
-    position_map = {
-        'top_left': 'overlay=10:10',
-        'top_right': 'overlay=main_w-overlay_w-10:10',
-        'bottom_left': 'overlay=10:main_h-overlay_h-10',
-        'bottom_right': 'overlay=main_w-overlay_w-10:main_h-overlay_h-10',
-        'center': 'overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2'
-    }
-
-    overlay_filter = position_map.get(position, position_map['bottom_right'])
-
-    # بناء الأمر
-    filter_complex = f"[1:v]format=rgba,colorchannelmixer=aa={opacity}[logo];[0:v][logo]{overlay_filter}"
-
-    cmd = [
-        'ffmpeg', '-y', '-i', video_path, '-i', logo_path,
-        '-filter_complex', filter_complex,
-        '-codec:a', 'copy',
-        output_path
-    ]
-
-    try:
-        process = create_popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        _, stderr = process.communicate()
-
-        if process.returncode == 0:
-            result['success'] = True
-        else:
-            result['error'] = f'فشل FFmpeg: {stderr[:500]}'
-    except FileNotFoundError:
-        result['error'] = 'FFmpeg غير مثبت على النظام'
-    except Exception as e:
-        result['error'] = f'خطأ: {str(e)}'
-
-    return result
-
-
+# ==================== Module Initialization ====================
 # تهيئة قاعدة البيانات عند تحميل الوحدة
 # Database is initialized in admin.py before this module is imported
+# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
+migrate_old_files()
+
 # Step 1: Run legacy database initialization for other tables
 migrate_json_to_sqlite()
 
 # Step 2: Run legacy template initialization (for backwards compatibility)
 init_default_templates()  # إنشاء قوالب الجداول الافتراضية
 ensure_default_templates()  # ضمان وجود القوالب الافتراضية (للترقية)
-
-
-def simple_encrypt(plain: str) -> str:
-    """
-    تشفير النص باستخدام نظام التشفير الآمن الجديد.
-    يستخدم Fernet إذا كان متاحاً، وإلا يستخدم XOR للتوافقية.
-    """
-    return secure_encrypt(plain)
-
-
-def simple_decrypt(enc: str) -> str:
-    """
-    فك تشفير النص باستخدام نظام التشفير الآمن الجديد.
-    يدعم فك تشفير البيانات المشفرة بالنظام القديم (XOR) للتوافقية.
-    """
-    return secure_decrypt(enc)
 
 
 # ==================== Notification Systems ====================

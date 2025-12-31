@@ -16,12 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from ui.helpers import load_app_icon
+from ui.helpers import load_app_icon, _set_windows_app_id
 from core import SingleInstanceManager, SINGLE_INSTANCE_BASE_NAME, APP_TITLE
 from services import initialize_database
-
-import ctypes
-
 
 
 # محاولة استيراد qdarktheme للثيم الداكن
@@ -30,26 +27,6 @@ try:
     HAS_QDARKTHEME = True
 except ImportError:
     HAS_QDARKTHEME = False
-
-
-def _set_windows_app_id(app_id: str = "JOMAA.PageManagement.1") -> bool:
-    """
-    تعيين Windows AppUserModelID لجعل إشعارات ويندوز تعرض اسم التطبيق الصحيح
-    Set Windows AppUserModelID to make Windows notifications show the correct app name
-    
-    Args:
-        app_id: معرّف فريد للتطبيق - Unique application ID
-    
-    Returns:
-        bool: True إذا نجح التعيين، False خلاف ذلك - True if successful, False otherwise
-    """
-    if sys.platform != 'win32':
-        return False
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-        return True
-    except (AttributeError, OSError):
-        return False
 
 
 def main():
