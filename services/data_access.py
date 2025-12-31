@@ -282,11 +282,15 @@ def get_upload_stats(page_id: str = None, days: int = 30) -> dict:
                     'failed': failed or 0
                 }
         
-        # إضافة المجموع الكلي
+        # إضافة المجموع الكلي - Calculate totals before adding 'overall' key
+        total_overall = sum(s['total'] for k, s in stats.items() if k != 'overall' and isinstance(s, dict))
+        successful_overall = sum(s['successful'] for k, s in stats.items() if k != 'overall' and isinstance(s, dict))
+        failed_overall = sum(s['failed'] for k, s in stats.items() if k != 'overall' and isinstance(s, dict))
+        
         stats['overall'] = {
-            'total': sum(s['total'] for s in stats.values() if isinstance(s, dict)),
-            'successful': sum(s['successful'] for s in stats.values() if isinstance(s, dict)),
-            'failed': sum(s['failed'] for s in stats.values() if isinstance(s, dict))
+            'total': total_overall,
+            'successful': successful_overall,
+            'failed': failed_overall
         }
         
         return stats

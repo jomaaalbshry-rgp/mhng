@@ -285,7 +285,7 @@ def mask_token(t: str) -> str:
     العائد / Returns:
         التوكن المخفي - Masked token
     """
-    if not t or len(t) < 10:
+    if not t or len(t) <= 12:
         return '***'
     return t[:8] + '...' + t[-4:]
 
@@ -367,7 +367,7 @@ def format_time_12h(time_str: str = None) -> str:
         minute = time_obj.minute
         
         # تحديد AM أو PM
-        period = 'م' if hour < 12 else 'ص'  # م للصباح، ص للمساء
+        period = 'ص' if hour < 12 else 'م'  # ص للصباح، م للمساء
         
         # تحويل إلى صيغة 12 ساعة
         hour_12 = hour % 12
@@ -408,9 +408,4 @@ __all__ = [
     'format_remaining_time',
     'format_time_12h',
     'format_datetime_12h',
-]
-    'create_icon_action',
-    'ICONS',
-    'ICON_COLORS',
-    'HAS_QTAWESOME',
 ]
