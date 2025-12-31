@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 from core.utils import run_subprocess
 from core.constants import MAX_VIDEO_DURATION_SECONDS
-from controllers.story_controller import get_random_emoji
 
 
 # كلمات يجب إزالتها من أسماء الملفات (lowercase فقط - المقارنة تتم بـ case-insensitive)
@@ -44,6 +43,19 @@ TITLE_CLEANUP_PATTERNS = [
     r'\b[4-8][Kk]\b',     # إزالة 4K, 8K
     r'\b(19|20)\d{2}\b',  # إزالة السنوات (1900-2099)
 ]
+
+
+def get_random_emoji() -> str:
+    """
+    الحصول على إيموجي عشوائي
+    Get a random emoji
+    
+    العائد:
+        إيموجي عشوائي
+    """
+    emojis = ['🔥', '✨', '💫', '⭐', '🌟', '💥', '🎯', '🚀', '💪', '👍', 
+              '❤️', '💙', '💚', '💛', '🧡', '💜', '🖤', '🤍', '💖', '💝']
+    return random.choice(emojis)
 
 
 def clean_filename_for_title(filename: str, remove_extension: bool = True) -> str:

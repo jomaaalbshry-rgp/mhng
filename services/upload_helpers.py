@@ -19,7 +19,8 @@ from core.constants import (
     WATERMARK_FFMPEG_TIMEOUT, WATERMARK_MIN_OUTPUT_RATIO, WATERMARK_FILE_CLOSE_DELAY,
     WATERMARK_CLEANUP_DELAY, VIDEO_EXTENSIONS
 )
-from core import run_subprocess, NotificationSystem
+from core.utils import run_subprocess
+from core.notifications import NotificationSystem
 from ui.signals import UiSignals
 from services.upload_service import UploadService
 

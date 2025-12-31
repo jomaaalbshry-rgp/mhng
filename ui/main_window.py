@@ -53,7 +53,7 @@ from controllers.story_controller import (
     StoryJob, get_story_files, count_story_files, get_next_story_batch,
     DEFAULT_STORIES_PER_SCHEDULE, DEFAULT_RANDOM_DELAY_MIN, DEFAULT_RANDOM_DELAY_MAX,
     upload_story, is_story_upload_successful, translate_fb_error,
-    get_random_emoji, get_random_delay, simulate_human_behavior, log_error_to_file,
+    get_random_delay, simulate_human_behavior, log_error_to_file,
     safe_process_story_job
 )
 from controllers.reels_controller import ReelsJob, get_reels_files, count_reels_files, check_reels_duration
@@ -69,7 +69,7 @@ from core import (
     make_job_key, get_job_key,
     # Video utils
     validate_video, clean_filename_for_title, calculate_jitter_interval,
-    sort_video_files, apply_template,
+    sort_video_files, apply_template, get_random_emoji,
     # Updater utils
     check_for_updates, get_installed_versions, create_update_script,
     run_update_and_restart, UPDATE_PACKAGES
