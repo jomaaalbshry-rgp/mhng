@@ -12,6 +12,10 @@ from .token_manager import (
     TokenExchangeWorker, AllPagesFetchWorker, get_token_manager
 )
 from .updater import *
+from .upload_helpers import (
+    resumable_upload, apply_watermark_to_video,
+    cleanup_temp_watermark_file, upload_video_once
+)
 
 # استيراد وحدة الوصول إلى البيانات - Import data access module
 from .data_access import (
@@ -62,4 +66,9 @@ __all__ = [
     'set_default_template',
     'get_schedule_times_for_template',
     'migrate_json_to_sqlite',
+    # Upload helpers
+    'resumable_upload',
+    'apply_watermark_to_video',
+    'cleanup_temp_watermark_file',
+    'upload_video_once',
 ]
