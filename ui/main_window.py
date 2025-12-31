@@ -141,6 +141,9 @@ from ui.scheduler_ui import SchedulerUI
 # استيراد الثيمات - Import Themes
 from ui.themes import LIGHT_THEME_FALLBACK, DARK_THEME_CUSTOM
 
+# استيراد معالجات الأحداث - Import Event Handlers
+from ui.handlers import TelegramHandlers, UpdateHandlers, JobHandlers
+
 
 # ==================== Fallback Protection for qdarktheme ====================
 # Ensure HAS_QDARKTHEME is always defined even if import fails
@@ -663,6 +666,11 @@ class MainWindow(QMainWindow):
 
         # تتبع الـ Threads النشطة لضمان التنظيف الآمن عند الإغلاق
         self._active_token_threads = []  # قائمة بجميع threads جلب التوكن النشطة
+
+        # تهيئة معالجات الأحداث - Initialize Event Handlers
+        self.telegram_handlers = TelegramHandlers(self)
+        self.update_handlers = UpdateHandlers(self, current_version="1.0.0")
+        self.job_handlers = JobHandlers(self)
 
         self.theme = "dark"
         self._load_settings_basic()

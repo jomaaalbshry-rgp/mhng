@@ -33,6 +33,12 @@ from .helpers import (
     HAS_QTAWESOME,
 )
 
+from .handlers import (
+    TelegramHandlers,
+    UpdateHandlers,
+    JobHandlers,
+)
+
 from .themes import (
     LIGHT_THEME_FALLBACK,
     DARK_THEME_CUSTOM,
@@ -71,4 +77,7 @@ __all__ = [
     'HAS_QTAWESOME',
     'LIGHT_THEME_FALLBACK',
     'DARK_THEME_CUSTOM',
+    'TelegramHandlers',
+    'UpdateHandlers',
+    'JobHandlers',
 ]
