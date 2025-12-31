@@ -33,31 +33,13 @@ class TokenManagementDialog(QDialog):
         self.setMinimumSize(700, 500)
         self._apps = []  # قائمة التطبيقات المحلية
         
-        # استيراد الدوال من parent أو استخدام الدوال الممررة
-        if get_all_app_tokens_func:
-            self._get_all_app_tokens = get_all_app_tokens_func
-        elif parent and hasattr(parent, 'get_all_app_tokens'):
-            self._get_all_app_tokens = parent.get_all_app_tokens
-        else:
-            # استيراد من ui.main_window
-            from ui.main_window import get_all_app_tokens
-            self._get_all_app_tokens = get_all_app_tokens
+        # حفظ الدوال الممررة
+        if not get_all_app_tokens_func or not save_app_token_func or not delete_app_token_func:
+            raise ValueError("يجب تمرير جميع الدوال المطلوبة: get_all_app_tokens_func, save_app_token_func, delete_app_token_func")
             
-        if save_app_token_func:
-            self._save_app_token = save_app_token_func
-        elif parent and hasattr(parent, 'save_app_token'):
-            self._save_app_token = parent.save_app_token
-        else:
-            from ui.main_window import save_app_token
-            self._save_app_token = save_app_token
-            
-        if delete_app_token_func:
-            self._delete_app_token = delete_app_token_func
-        elif parent and hasattr(parent, 'delete_app_token'):
-            self._delete_app_token = parent.delete_app_token
-        else:
-            from ui.main_window import delete_app_token
-            self._delete_app_token = delete_app_token
+        self._get_all_app_tokens = get_all_app_tokens_func
+        self._save_app_token = save_app_token_func
+        self._delete_app_token = delete_app_token_func
         
         self._build_ui()
         self._load_apps()
