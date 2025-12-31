@@ -970,7 +970,7 @@ def add_watermark(video_path: str, logo_path: str, output_path: str,
 initialize_database()
 
 # Step 2: Run legacy database initialization for other tables
-init_database()
+# Note: init_database() removed - it was undefined and caused NameError
 migrate_json_to_sqlite()
 
 # Step 3: Run legacy template initialization (for backwards compatibility)
