@@ -56,6 +56,12 @@ The project follows a **Multi-Layered Architecture** pattern with clear separati
 - Main application window
 - Manages tabs (video, story, reels, scheduler)
 - Displays logs and status
+- **Phase 6**: Reduced from 7,868 to 6,822 lines (849 lines moved to services)
+
+##### `ui/helpers.py`
+- دوال مساعدة للواجهة
+- UI helper functions
+- **Phase 6**: Added formatting functions (mask_token, format_time, etc.)
 
 ##### `ui/scheduler_ui.py`
 - واجهة المجدول
@@ -82,6 +88,8 @@ ui/panels/
 │                         Shared between video and reels / مشتركة بين الفيديو والريلز
 ├── story_panel.py      → StoryPanel(QWidget) with unique story settings
 │                         لوحة الستوري مع إعدادات فريدة
+├── pages_panel.py      → PagesPanel(QWidget) for page management
+│                         لوحة إدارة الصفحات
 └── reels_panel.py      → Documentation ONLY - explains why NO ReelsPanel class
                           توثيق فقط - يشرح لماذا لا توجد ReelsPanel class
 ```
@@ -278,6 +286,52 @@ class UploadService:
 - Upload files to Facebook
 - Support resumable upload
 - Track progress
+
+##### `services/data_access.py` 🆕
+```python
+# Phase 6: Data access functions (24 functions)
+# Moved from ui/main_window.py
+
+# File Paths
+- get_settings_file()
+- get_jobs_file()
+- get_database_file()
+- migrate_old_files()
+
+# Hashtag Management
+- save_hashtag_group()
+- get_hashtag_groups()
+- delete_hashtag_group()
+
+# Schedule Templates
+- init_default_templates()
+- ensure_default_templates()
+- get_all_templates()
+- get_template_by_id()
+- save_template()
+- delete_template()
+- get_default_template()
+- set_default_template()
+- get_schedule_times_for_template()
+
+# Upload Statistics
+- log_upload()
+- get_upload_stats()
+- reset_upload_stats()
+- generate_text_chart()
+
+# Working Hours (Legacy)
+- is_within_working_hours()
+- calculate_time_to_working_hours_start()
+```
+
+**المسؤوليات**:
+- الوصول إلى البيانات المحلية
+- إدارة قاعدة البيانات
+- إحصائيات الرفع
+- Data access layer
+- Database management
+- Upload statistics
 
 **التواصل**:
 - **من Controllers**: يُستدعى من المتحكمات
