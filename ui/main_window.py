@@ -99,7 +99,7 @@ from ui.dialogs import (
 from ui.helpers import (
     create_fallback_icon, load_app_icon, get_icon,
     create_icon_button, create_icon_action,
-    ICONS, ICON_COLORS, HAS_QTAWESOME,
+    ICONS, ICON_COLORS, HAS_QTAWESOME, HAS_QDARKTHEME,
     # Import formatting functions
     mask_token, seconds_to_value_unit, format_remaining_time,
     format_time_12h, format_datetime_12h,
@@ -120,6 +120,28 @@ from ui.signals import UiSignals
 
 # استيراد واجهة المجدول - Import Scheduler UI
 from ui.scheduler_ui import SchedulerUI
+
+
+# ==================== Fallback Protection for qdarktheme ====================
+# Ensure HAS_QDARKTHEME is always defined even if import fails
+# التأكد من أن HAS_QDARKTHEME معرّف دائماً حتى لو فشل الاستيراد
+try:
+    # Already imported from ui.helpers, but verify it exists
+    _ = HAS_QDARKTHEME
+except NameError:
+    HAS_QDARKTHEME = False
+    qdarktheme = None
+
+# Import qdarktheme module if available (for apply_theme function)
+# استيراد وحدة qdarktheme إذا كانت متاحة (لدالة apply_theme)
+if HAS_QDARKTHEME:
+    try:
+        import qdarktheme
+    except ImportError:
+        HAS_QDARKTHEME = False
+        qdarktheme = None
+else:
+    qdarktheme = None
 
 
 
@@ -3002,15 +3024,40 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def apply_theme(self, theme: str, announce=True):
+        """
+        تطبيق الثيم على التطبيق
+        Apply theme to the application
+        
+        المعاملات / Args:
+            theme: اسم الثيم ('dark' أو 'light') - Theme name ('dark' or 'light')
+            announce: إظهار إشعار بتطبيق الثيم - Show notification when applying theme
+        """
+        # حماية إضافية - Additional protection
+        global HAS_QDARKTHEME, qdarktheme
+        
         self.theme = "dark" if theme == "dark" else "light"
         app = QApplication.instance()
-        if HAS_QDARKTHEME:
+        
+        # محاولة تطبيق الثيم باستخدام qdarktheme إن كان متاحاً
+        # Try to apply theme using qdarktheme if available
+        if HAS_QDARKTHEME and qdarktheme is not None:
             try:
                 css = qdarktheme.load_stylesheet(self.theme)
-            except Exception:
+            except Exception as e:
+                # إذا فشل تطبيق الثيم، استخدم الثيم الافتراضي
+                # If theme application fails, use default theme
+                log_warning(f'فشل تحميل qdarktheme stylesheet: {e}')
                 css = ""
+                # التبديل إلى fallback
+                HAS_QDARKTHEME = False
         else:
-            # Fallback يدوي إذا لم تتوفر المكتبة
+            # qdarktheme غير متاح - استخدم fallback stylesheet
+            # qdarktheme not available - use fallback stylesheet
+            css = ""
+        
+        # إذا لم يتم تحميل CSS من qdarktheme، استخدم fallback يدوي
+        # If CSS was not loaded from qdarktheme, use manual fallback
+        if not css:
             if self.theme == "dark":
                 css = """
                 QWidget { background-color: #242933; color: #e6e6e6; }
