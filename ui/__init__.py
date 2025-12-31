@@ -27,6 +27,7 @@ from .helpers import (
     ICONS,
     ICON_COLORS,
     HAS_QTAWESOME,
+    HAS_QDARKTHEME,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     'ICONS',
     'ICON_COLORS',
     'HAS_QTAWESOME',
+    'HAS_QDARKTHEME',
 ]
