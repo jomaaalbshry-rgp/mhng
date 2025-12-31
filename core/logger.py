@@ -497,6 +497,43 @@ def log_exception(message: str, extra_info: str = None):
     get_logger().exception(message, extra_info)
 
 
+def log_error_to_file(error, extra_info=None):
+    """
+    تسجيل الأخطاء في ملف لمنع إغلاق البرنامج.
+    Log errors to file to prevent program crash.
+    
+    المعاملات / Parameters:
+        error: الخطأ الذي حدث / The error that occurred (Exception or str)
+        extra_info: معلومات إضافية / Additional information (optional)
+    """
+    import traceback
+    try:
+        logs_dir = _get_logs_directory()
+        log_file = logs_dir / f'error_{datetime.now().strftime("%Y%m%d")}.log'
+        
+        exc_info = sys.exc_info()
+        if exc_info[0] is not None:
+            tb_str = ''.join(traceback.format_exception(*exc_info))
+        else:
+            tb_str = traceback.format_exc()
+        
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f'\n{"=" * 80}\n')
+            f.write(f'[{timestamp}] Error Log\n')
+            if extra_info:
+                f.write(f'Context: {extra_info}\n')
+            f.write(f'Error: {error}\n')
+            f.write(f'Traceback:\n{tb_str}\n')
+            f.write(f'{"=" * 80}\n')
+        
+        # Also log using the unified logger
+        log_error(f"Error logged to file: {error}", extra_info, exc_info=True)
+    except Exception as log_err:
+        # If logging fails, print to stderr to avoid silent failures
+        print(f'Failed to log error to file: {log_err}', file=sys.stderr)
+
+
 # ==================== رموز الخطأ ====================
 
 class ErrorCodes:

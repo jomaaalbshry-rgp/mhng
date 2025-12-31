@@ -47,7 +47,7 @@ from .constants import (
 )
 from .logger import (
     get_logger, log_debug, log_info, log_warning, log_error, 
-    log_critical, log_exception, UnifiedLogger, ErrorCodes,
+    log_critical, log_exception, log_error_to_file, UnifiedLogger, ErrorCodes,
     UploadError, NetworkError, APIError, FileError
 )
 from .base_job import BaseJob
@@ -110,6 +110,7 @@ __all__ = [
     'log_error',
     'log_critical',
     'log_exception',
+    'log_error_to_file',
     'UnifiedLogger',
     'ErrorCodes',
     'UploadError',
