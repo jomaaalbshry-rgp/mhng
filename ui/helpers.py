@@ -285,8 +285,10 @@ def mask_token(t: str) -> str:
     العائد / Returns:
         التوكن المخفي - Masked token
     """
-    if not t or len(t) <= 12:
-        return '***'
+    if not t:
+        return "(لا يوجد)"
+    if len(t) <= 12:
+        return t
     return t[:8] + '...' + t[-4:]
 
 
