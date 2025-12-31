@@ -25,8 +25,9 @@ class UpdateCheckThread(QThread):
     
     def run(self):
         try:
+            # Returns list of (name, current_version, latest_version) tuples
             result = check_for_updates()
-            if result:  # List of available updates
+            if result and isinstance(result, list):  # Validate it's a non-empty list
                 self.update_available.emit(result)
             else:
                 self.no_update.emit()
@@ -102,11 +103,23 @@ class UpdateHandlers:
             )
     
     def _download_and_install(self, update_info: list):
-        """تحميل وتثبيت التحديث"""
-        # update_info is a list of (name, current_version, latest_version)
+        """
+        تحميل وتثبيت التحديث
+        
+        Args:
+            update_info: List of (name, current_version, latest_version) tuples
+        
+        Raises:
+            NotImplementedError: This functionality needs to be implemented
+        
+        TODO: Implement using core.updater_utils.create_update_script 
+              and run_update_and_restart
+        """
         # Extract package names for the update
         packages_to_update = [name for name, _, _ in update_info]
-        # Future implementation: use create_update_script and run_update_and_restart
-        # from core.updater_utils
         log_info(f"Update requested for packages: {packages_to_update}")
-        raise NotImplementedError("Update installation not yet implemented in handlers")
+        raise NotImplementedError(
+            "Download and installation functionality not yet implemented. "
+            "Use core.updater_utils.create_update_script and run_update_and_restart "
+            "to implement this feature."
+        )
