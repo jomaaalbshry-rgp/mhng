@@ -7,14 +7,25 @@ managing icons, and other UI-related helper functions.
 Functions added in Phase 6:
 - Formatting functions (format_remaining_time, format_time_12h, etc.)
 - Token utility (mask_token)
+
+Functions added during refactoring:
+- simple_encrypt, simple_decrypt
+- check_ffmpeg_available
+- add_watermark
+- _set_windows_app_id
 """
 
 import os
+import sys
+import ctypes
+import subprocess
 from datetime import datetime, timedelta
+from typing import Optional, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont, QAction
 from PySide6.QtWidgets import QPushButton
-from core import get_resource_path
+from core import get_resource_path, run_subprocess, create_popen
+from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_decrypt
 
 
 def create_fallback_icon() -> QIcon:
@@ -395,6 +406,171 @@ def format_datetime_12h() -> str:
     return f'{date_str} {time_str}'
 
 
+# ==================== Windows Specific Functions ====================
+
+def _set_windows_app_id(app_id: str = "JOMAA.PageManagement.1") -> bool:
+    """
+    تعيين Windows AppUserModelID لجعل إشعارات ويندوز تعرض اسم التطبيق الصحيح.
+    يجب استدعاء هذه الدالة قبل إنشاء QApplication.
+    
+    المعاملات:
+        app_id: معرّف فريد للتطبيق (يُستخدم في ويندوز لتمييز التطبيق).
+    
+    العائد:
+        True إذا نجح التعيين، False خلاف ذلك.
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        return True
+    except (AttributeError, OSError):
+        return False
+
+
+# ==================== Encryption Functions ====================
+
+def simple_encrypt(plain: str) -> str:
+    """
+    تشفير النص باستخدام نظام التشفير الآمن الجديد.
+    يستخدم Fernet إذا كان متاحاً، وإلا يستخدم XOR للتوافقية.
+    
+    Encrypt text using the new secure encryption system.
+    Uses Fernet if available, otherwise uses XOR for compatibility.
+    
+    Args:
+        plain: النص المراد تشفيره - Text to encrypt
+    
+    Returns:
+        النص المشفر - Encrypted text
+    """
+    return secure_encrypt(plain)
+
+
+def simple_decrypt(enc: str) -> str:
+    """
+    فك تشفير النص باستخدام نظام التشفير الآمن الجديد.
+    يدعم فك تشفير البيانات المشفرة بالنظام القديم (XOR) للتوافقية.
+    
+    Decrypt text using the new secure encryption system.
+    Supports decryption of legacy XOR-encrypted data for compatibility.
+    
+    Args:
+        enc: النص المشفر - Encrypted text
+    
+    Returns:
+        النص الأصلي - Decrypted text
+    """
+    return secure_decrypt(enc)
+
+
+# ==================== FFmpeg Functions ====================
+
+def check_ffmpeg_available() -> dict:
+    """
+    التحقق من توفر FFmpeg على النظام.
+    Check if FFmpeg is available on the system.
+    
+    العائد / Returns:
+        dict يحتوي على:
+        - available: bool - هل FFmpeg متوفر
+        - version: str - إصدار FFmpeg
+        - path: str - مسار FFmpeg
+    """
+    result = {'available': False, 'version': None, 'path': None}
+    
+    try:
+        output = run_subprocess(['ffmpeg', '-version'], timeout=10, text=True)
+        if output.returncode == 0:
+            result['available'] = True
+            # استخراج الإصدار من السطر الأول
+            first_line = output.stdout.split('\n')[0]
+            result['version'] = first_line
+        
+        # محاولة إيجاد المسار
+        if sys.platform == 'win32':
+            where_output = run_subprocess(['where', 'ffmpeg'], timeout=10, text=True)
+            if where_output.returncode == 0:
+                result['path'] = where_output.stdout.strip().split('\n')[0]
+        else:
+            which_output = run_subprocess(['which', 'ffmpeg'], timeout=10, text=True)
+            if which_output.returncode == 0:
+                result['path'] = which_output.stdout.strip()
+    except FileNotFoundError:
+        result['available'] = False
+    except Exception:
+        pass
+    
+    return result
+
+
+def add_watermark(video_path: str, logo_path: str, output_path: str,
+                  position: str = 'bottom_right', opacity: float = 0.8,
+                  progress_callback: Optional[Callable] = None) -> dict:
+    """
+    إضافة علامة مائية على الفيديو باستخدام FFmpeg.
+    Add watermark to video using FFmpeg.
+    
+    المعاملات / Args:
+        video_path: مسار الفيديو الأصلي - Path to original video
+        logo_path: مسار ملف الشعار - Path to logo file
+        output_path: مسار الفيديو الناتج - Path to output video
+        position: موقع الشعار - Logo position (top_left, top_right, bottom_left, bottom_right, center)
+        opacity: مستوى الشفافية - Opacity level (0.0 - 1.0)
+        progress_callback: دالة لإظهار التقدم - Function to show progress
+    
+    العائد / Returns:
+        dict يحتوي على نجاح/فشل العملية - dict containing success/failure status
+    """
+    result = {'success': False, 'error': None, 'output_path': output_path}
+    
+    if not os.path.exists(video_path):
+        result['error'] = 'ملف الفيديو غير موجود'
+        return result
+    
+    if not os.path.exists(logo_path):
+        result['error'] = 'ملف الشعار غير موجود'
+        return result
+    
+    # تحديد موقع الشعار
+    position_map = {
+        'top_left': 'overlay=10:10',
+        'top_right': 'overlay=main_w-overlay_w-10:10',
+        'bottom_left': 'overlay=10:main_h-overlay_h-10',
+        'bottom_right': 'overlay=main_w-overlay_w-10:main_h-overlay_h-10',
+        'center': 'overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2'
+    }
+    
+    overlay_filter = position_map.get(position, position_map['bottom_right'])
+    
+    # بناء الأمر
+    filter_complex = f"[1:v]format=rgba,colorchannelmixer=aa={opacity}[logo];[0:v][logo]{overlay_filter}"
+    
+    cmd = [
+        'ffmpeg', '-y', '-i', video_path, '-i', logo_path,
+        '-filter_complex', filter_complex,
+        '-codec:a', 'copy',
+        output_path
+    ]
+    
+    try:
+        process = create_popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        _, stderr = process.communicate()
+        
+        if process.returncode == 0:
+            result['success'] = True
+        else:
+            result['error'] = f'فشل FFmpeg: {stderr[:500]}'
+    except FileNotFoundError:
+        result['error'] = 'FFmpeg غير مثبت على النظام'
+    except Exception as e:
+        result['error'] = f'خطأ: {str(e)}'
+    
+    return result
+
+
 __all__ = [
     'create_fallback_icon',
     'load_app_icon',
@@ -410,4 +586,12 @@ __all__ = [
     'format_remaining_time',
     'format_time_12h',
     'format_datetime_12h',
+    # Windows functions
+    '_set_windows_app_id',
+    # Encryption functions
+    'simple_encrypt',
+    'simple_decrypt',
+    # FFmpeg functions
+    'check_ffmpeg_available',
+    'add_watermark',
 ]

@@ -21,7 +21,8 @@ from .data_access import (
     log_upload, get_upload_stats, reset_upload_stats, generate_text_chart,
     init_default_templates, ensure_default_templates,
     get_all_templates, get_template_by_id, save_template, delete_template,
-    get_default_template, set_default_template, get_schedule_times_for_template
+    get_default_template, set_default_template, get_schedule_times_for_template,
+    migrate_json_to_sqlite
 )
 
 # تصدير الخدمات - Export services
@@ -60,4 +61,5 @@ __all__ = [
     'get_default_template',
     'set_default_template',
     'get_schedule_times_for_template',
+    'migrate_json_to_sqlite',
 ]

@@ -40,7 +40,8 @@ from services import (
     log_upload, get_upload_stats, reset_upload_stats, generate_text_chart,
     init_default_templates, ensure_default_templates,
     get_all_templates, get_template_by_id, save_template, delete_template,
-    get_default_template, set_default_template, get_schedule_times_for_template
+    get_default_template, set_default_template, get_schedule_times_for_template,
+    migrate_json_to_sqlite
 )
 from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_decrypt
 
@@ -97,7 +98,10 @@ from ui.helpers import (
     ICONS, ICON_COLORS, HAS_QTAWESOME,
     # Import formatting functions
     mask_token, seconds_to_value_unit, format_remaining_time,
-    format_time_12h, format_datetime_12h
+    format_time_12h, format_datetime_12h,
+    # Import helper functions (Phase 7 Refactoring)
+    _set_windows_app_id, simple_encrypt, simple_decrypt,
+    check_ffmpeg_available, add_watermark
 )
 from ui.components import JobsTable, LogViewer, LogLevel, ProgressWidget
 
@@ -107,125 +111,15 @@ from controllers import VideoController, StoryController, ReelsController, Sched
 # استيراد فئات الفيديو من video_panel - Import video classes from video_panel
 from ui.panels import DraggablePreviewLabel, WatermarkPreviewDialog, StoryPanel, PagesPanel
 
+# استيراد إشارات الواجهة - Import UI signals
+from ui.signals import UiSignals
+
 # استيراد واجهة المجدول - Import Scheduler UI
 from ui.scheduler_ui import SchedulerUI
 
 
 
-# ==================== Helper Functions from admin.py ====================
-
-def _set_windows_app_id(app_id: str = "JOMAA.PageManagement.1") -> bool:
-    """
-    تعيين Windows AppUserModelID لجعل إشعارات ويندوز تعرض اسم التطبيق الصحيح.
-    يجب استدعاء هذه الدالة قبل إنشاء QApplication.
-
-    المعاملات:
-        app_id: معرّف فريد للتطبيق (يُستخدم في ويندوز لتمييز التطبيق).
-
-    العائد:
-        True إذا نجح التعيين، False خلاف ذلك.
-    """
-    if sys.platform != 'win32':
-        return False
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
-        return True
-    except (AttributeError, OSError):
-        return False
-
-
-# محاولة استيراد qdarktheme
-HAS_QDARKTHEME = False
-QDT_VERSION = ""
-try:
-    import qdarktheme
-    HAS_QDARKTHEME = True
-    try:
-        import importlib.metadata as _imd
-        QDT_VERSION = _imd.version("qdarktheme")
-    except Exception:
-        QDT_VERSION = "unknown"
-except Exception:
-    HAS_QDARKTHEME = False
-
-
-# APP_TITLE and APP_DATA_FOLDER have been moved to core/constants.py
-
-# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
-migrate_old_files()
-
-# ==================== Constants ====================
-# All constants have been moved to core/constants.py
-# They are imported above from core
-
-
-# ==================== SQLite Database ====================
-# Database path and init functions moved to services/data_access.py
-# Note: init_database() is imported from services above
-
-def migrate_json_to_sqlite():
-    """
-    ترحيل البيانات من ملفات JSON إلى SQLite عند أول تشغيل.
-    Migrate data from JSON files to SQLite on first run.
-    """
-    db_path = get_database_file()
-    jobs_file = get_jobs_file()
-    settings_file = get_settings_file()
-
-    # التحقق من وجود بيانات للترحيل
-    if not jobs_file.exists() and not settings_file.exists():
-        return
-
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    # ترحيل الوظائف
-    if jobs_file.exists():
-        try:
-            with open(jobs_file, 'r', encoding='utf-8') as f:
-                jobs_data = json.load(f)
-
-            for job in jobs_data:
-                cursor.execute('''
-                    INSERT OR REPLACE INTO jobs
-                    (page_id, page_name, folder, interval_seconds, page_access_token,
-                     next_index, title_template, description_template, chunk_size,
-                     use_filename_as_title, enabled, is_scheduled, next_run_timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    job.get('page_id'),
-                    job.get('page_name', ''),
-                    job.get('folder', ''),
-                    job.get('interval_seconds', 10800),
-                    job.get('page_access_token'),
-                    job.get('next_index', 0),
-                    job.get('title_template', '{filename}'),
-                    job.get('description_template', ''),
-                    job.get('chunk_size', CHUNK_SIZE_DEFAULT),
-                    1 if job.get('use_filename_as_title', False) else 0,
-                    1 if job.get('enabled', True) else 0,
-                    1 if job.get('is_scheduled', False) else 0,
-                    job.get('next_run_timestamp')
-                ))
-        except Exception:
-            pass
-
-    # ترحيل الإعدادات
-    if settings_file.exists():
-        try:
-            with open(settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-
-            for key, value in settings.items():
-                cursor.execute('''
-                    INSERT OR REPLACE INTO settings (key, value)
-                    VALUES (?, ?)
-                ''', (key, json.dumps(value) if not isinstance(value, str) else value))
-        except Exception:
-            pass
-
-    conn.commit()
-    conn.close()
+# ==================== Constants and Module Initialization ====================
 
 
 # ==================== App Tokens Management ====================
@@ -859,135 +753,18 @@ def validate_video(video_path: str, log_fn=None) -> dict:
     return result
 
 
-# ==================== FFmpeg Watermark ====================
-
-def check_ffmpeg_available() -> dict:
-    """
-    التحقق من توفر FFmpeg على النظام.
-
-    العائد:
-        dict يحتوي على:
-        - available: bool - هل FFmpeg متوفر
-        - version: str - إصدار FFmpeg
-        - path: str - مسار FFmpeg
-    """
-    result = {'available': False, 'version': None, 'path': None}
-
-    try:
-        output = run_subprocess(['ffmpeg', '-version'], timeout=10, text=True)
-        if output.returncode == 0:
-            result['available'] = True
-            # استخراج الإصدار من السطر الأول
-            first_line = output.stdout.split('\n')[0]
-            result['version'] = first_line
-
-        # محاولة إيجاد المسار
-        if sys.platform == 'win32':
-            where_output = run_subprocess(['where', 'ffmpeg'], timeout=10, text=True)
-            if where_output.returncode == 0:
-                result['path'] = where_output.stdout.strip().split('\n')[0]
-        else:
-            which_output = run_subprocess(['which', 'ffmpeg'], timeout=10, text=True)
-            if which_output.returncode == 0:
-                result['path'] = which_output.stdout.strip()
-    except FileNotFoundError:
-        result['available'] = False
-    except Exception:
-        pass
-
-    return result
-
-
-def add_watermark(video_path: str, logo_path: str, output_path: str,
-                  position: str = 'bottom_right', opacity: float = 0.8,
-                  progress_callback=None) -> dict:
-    """
-    إضافة علامة مائية على الفيديو باستخدام FFmpeg.
-
-    المعاملات:
-        video_path: مسار الفيديو الأصلي
-        logo_path: مسار ملف الشعار
-        output_path: مسار الفيديو الناتج
-        position: موقع الشعار (top_left, top_right, bottom_left, bottom_right, center)
-        opacity: مستوى الشفافية (0.0 - 1.0)
-        progress_callback: دالة لإظهار التقدم
-
-    العائد:
-        dict يحتوي على نجاح/فشل العملية
-    """
-    result = {'success': False, 'error': None, 'output_path': output_path}
-
-    if not os.path.exists(video_path):
-        result['error'] = 'ملف الفيديو غير موجود'
-        return result
-
-    if not os.path.exists(logo_path):
-        result['error'] = 'ملف الشعار غير موجود'
-        return result
-
-    # تحديد موقع الشعار
-    position_map = {
-        'top_left': 'overlay=10:10',
-        'top_right': 'overlay=main_w-overlay_w-10:10',
-        'bottom_left': 'overlay=10:main_h-overlay_h-10',
-        'bottom_right': 'overlay=main_w-overlay_w-10:main_h-overlay_h-10',
-        'center': 'overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2'
-    }
-
-    overlay_filter = position_map.get(position, position_map['bottom_right'])
-
-    # بناء الأمر
-    filter_complex = f"[1:v]format=rgba,colorchannelmixer=aa={opacity}[logo];[0:v][logo]{overlay_filter}"
-
-    cmd = [
-        'ffmpeg', '-y', '-i', video_path, '-i', logo_path,
-        '-filter_complex', filter_complex,
-        '-codec:a', 'copy',
-        output_path
-    ]
-
-    try:
-        process = create_popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        _, stderr = process.communicate()
-
-        if process.returncode == 0:
-            result['success'] = True
-        else:
-            result['error'] = f'فشل FFmpeg: {stderr[:500]}'
-    except FileNotFoundError:
-        result['error'] = 'FFmpeg غير مثبت على النظام'
-    except Exception as e:
-        result['error'] = f'خطأ: {str(e)}'
-
-    return result
-
-
+# ==================== Module Initialization ====================
 # تهيئة قاعدة البيانات عند تحميل الوحدة
 # Database is initialized in admin.py before this module is imported
+# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
+migrate_old_files()
+
 # Step 1: Run legacy database initialization for other tables
 migrate_json_to_sqlite()
 
 # Step 2: Run legacy template initialization (for backwards compatibility)
 init_default_templates()  # إنشاء قوالب الجداول الافتراضية
 ensure_default_templates()  # ضمان وجود القوالب الافتراضية (للترقية)
-
-
-def simple_encrypt(plain: str) -> str:
-    """
-    تشفير النص باستخدام نظام التشفير الآمن الجديد.
-    يستخدم Fernet إذا كان متاحاً، وإلا يستخدم XOR للتوافقية.
-    """
-    return secure_encrypt(plain)
-
-
-def simple_decrypt(enc: str) -> str:
-    """
-    فك تشفير النص باستخدام نظام التشفير الآمن الجديد.
-    يدعم فك تشفير البيانات المشفرة بالنظام القديم (XOR) للتوافقية.
-    """
-    return secure_decrypt(enc)
 
 
 # ==================== Notification Systems ====================
@@ -1770,14 +1547,6 @@ def is_rate_limit_error(body) -> bool:
     return _upload_service.is_rate_limit_error(body)
 
 
-class UiSignals(QObject):
-    log_signal = Signal(str)
-    progress_signal = Signal(int, str)
-    clear_progress_signal = Signal()
-    job_enabled_changed = Signal(str, bool)  # page_id, enabled
-    # إشارات لاختبار Telegram والتحديثات - لضمان تحديث الواجهة من الخيط الرئيسي
-    telegram_test_result = Signal(bool, str)  # success, message
-    update_check_finished = Signal()  # إشارة لإنهاء التحقق من التحديثات
 
 
 class JobListItemWidget(QWidget):

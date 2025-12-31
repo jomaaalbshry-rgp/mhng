@@ -5,6 +5,7 @@ User Interface module
 
 from .main_window import MainWindow
 from .scheduler_ui import SchedulerUI
+from .signals import UiSignals
 
 from .widgets import (
     NoScrollComboBox,
@@ -31,6 +32,7 @@ from .helpers import (
 __all__ = [
     'MainWindow',
     'SchedulerUI',
+    'UiSignals',
     'NoScrollComboBox',
     'NoScrollSpinBox',
     'NoScrollDoubleSpinBox',
