@@ -57,6 +57,7 @@ The project follows a **Multi-Layered Architecture** pattern with clear separati
 - Manages tabs (video, story, reels, scheduler)
 - Displays logs and status
 - **Phase 6**: Reduced from 7,868 to 6,822 lines (849 lines moved to services)
+- **Phase 2**: Reduced from 5,931 to 5,252 lines (679 lines - schedulers moved to core)
 
 ##### `ui/helpers.py`
 - دوال مساعدة للواجهة
@@ -365,6 +366,13 @@ class SingleInstanceManager:
 - **TokenExchangeThread**: خيط تبديل التوكن
 - **FetchPagesThread**: خيط جلب الصفحات
 - Background worker threads
+
+#### `core/schedulers/`
+- **SchedulerThread**: مجدول رفع الفيديوهات (video_scheduler.py)
+- **StorySchedulerThread**: مجدول رفع الستوري (story_scheduler.py)
+- **ReelsSchedulerThread**: مجدول رفع الريلز (reels_scheduler.py)
+- Video, story, and reels upload schedulers
+- **Phase 2**: Extracted from ui/main_window.py (~700 lines reduced)
 
 #### `core/notifications.py`
 - **TelegramNotifier**: إرسال إشعارات تلجرام
