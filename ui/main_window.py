@@ -111,6 +111,9 @@ from controllers import VideoController, StoryController, ReelsController, Sched
 # استيراد فئات الفيديو من video_panel - Import video classes from video_panel
 from ui.panels import DraggablePreviewLabel, WatermarkPreviewDialog, StoryPanel, PagesPanel
 
+# استيراد إشارات الواجهة - Import UI signals
+from ui.signals import UiSignals
+
 # استيراد واجهة المجدول - Import Scheduler UI
 from ui.scheduler_ui import SchedulerUI
 
@@ -1544,14 +1547,6 @@ def is_rate_limit_error(body) -> bool:
     return _upload_service.is_rate_limit_error(body)
 
 
-class UiSignals(QObject):
-    log_signal = Signal(str)
-    progress_signal = Signal(int, str)
-    clear_progress_signal = Signal()
-    job_enabled_changed = Signal(str, bool)  # page_id, enabled
-    # إشارات لاختبار Telegram والتحديثات - لضمان تحديث الواجهة من الخيط الرئيسي
-    telegram_test_result = Signal(bool, str)  # success, message
-    update_check_finished = Signal()  # إشارة لإنهاء التحقق من التحديثات
 
 
 class JobListItemWidget(QWidget):
