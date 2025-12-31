@@ -117,6 +117,13 @@ from ui.signals import UiSignals
 # استيراد واجهة المجدول - Import Scheduler UI
 from ui.scheduler_ui import SchedulerUI
 
+# محاولة استيراد qdarktheme للثيم الداكن
+# Try to import qdarktheme for dark theme support
+try:
+    import qdarktheme
+    HAS_QDARKTHEME = True
+except ImportError:
+    HAS_QDARKTHEME = False
 
 
 # ==================== Constants and Module Initialization ====================
