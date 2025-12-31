@@ -129,6 +129,9 @@ from controllers import VideoController, StoryController, ReelsController, Sched
 # استيراد فئات الفيديو من video_panel - Import video classes from video_panel
 from ui.panels import DraggablePreviewLabel, WatermarkPreviewDialog, StoryPanel, PagesPanel
 
+# استيراد التبويبات - Import Tabs
+from ui.tabs import SettingsTab
+
 # استيراد إشارات الواجهة - Import UI signals
 from ui.signals import UiSignals
 
@@ -1057,10 +1060,10 @@ class MainWindow(QMainWindow):
         else:
             self.mode_tabs.addTab(self.pages_panel, 'الصفحات')
 
-        # تبويب الإعدادات المتقدمة (تم إزالة ساعات العمل منها - Requirement 4)
+        # تبويب الإعدادات المتقدمة - Settings Tab
         # إضافة QScrollArea لدعم التمرير بعجلة الماوس (Issue #2)
-        settings_tab = QWidget()
-        settings_tab_layout = QVBoxLayout(settings_tab)
+        settings_tab_container = QWidget()
+        settings_tab_layout = QVBoxLayout(settings_tab_container)
         settings_tab_layout.setContentsMargins(0, 0, 0, 0)
 
         # إنشاء منطقة التمرير
@@ -1070,20 +1073,37 @@ class MainWindow(QMainWindow):
         settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         settings_scroll.setFrameShape(QFrame.NoFrame)
 
-        # ويدجت داخلي يحتوي على جميع الإعدادات
-        settings_content = QWidget()
-        settings_layout = QVBoxLayout(settings_content)
-        self._build_settings_tab(settings_layout)
-
-        settings_scroll.setWidget(settings_content)
+        # استخدام SettingsTab الجديد
+        self.settings_tab = SettingsTab(self)
+        settings_scroll.setWidget(self.settings_tab)
         settings_tab_layout.addWidget(settings_scroll)
 
         if HAS_QTAWESOME:
-            self.mode_tabs.addTab(settings_tab, get_icon(ICONS['settings'], ICON_COLORS.get('settings')), 'إعدادات')
+            self.mode_tabs.addTab(settings_tab_container, get_icon(ICONS['settings'], ICON_COLORS.get('settings')), 'إعدادات')
         else:
-            self.mode_tabs.addTab(settings_tab, 'إعدادات')
+            self.mode_tabs.addTab(settings_tab_container, 'إعدادات')
 
         self.mode_tabs.currentChanged.connect(self._on_mode_tab_changed)
+        
+        # Connect settings tab signals
+        self.settings_tab.settings_changed.connect(self._on_settings_tab_changed)
+        self.settings_tab.log_message.connect(self._log_append)
+        self.settings_tab.telegram_test_result.connect(self._update_telegram_test_result)
+        self.settings_tab.update_check_finished.connect(self._finish_update_check)
+        # Connect update button to run updates
+        self.settings_tab.update_all_btn.clicked.connect(self._run_updates_from_tab)
+        
+        # Load settings into settings tab
+        self.settings_tab.set_settings({
+            'validate_videos': self.validate_videos,
+            'internet_check_enabled': self.internet_check_enabled,
+            'telegram_enabled': self.telegram_enabled,
+            'telegram_bot_token': self.telegram_bot_token,
+            'telegram_chat_id': self.telegram_chat_id,
+            'telegram_notify_success': self.telegram_notify_success,
+            'telegram_notify_errors': self.telegram_notify_errors,
+        })
+        
         left.addWidget(self.mode_tabs)
         main_h.addLayout(left, 2)
 
@@ -3105,628 +3125,47 @@ class MainWindow(QMainWindow):
             # تحديث الشفافية
             self.job_watermark_opacity_slider.setValue(int(settings['opacity'] * 100))
 
-    def _build_stats_tab(self, layout):
-        """بناء تبويب الإحصائيات."""
-        stats_group = QGroupBox('إحصائيات الرفع')
-        stats_form = QFormLayout()
-
-        # إحصائيات عامة
-        self.stats_total_label = QLabel('0')
-        stats_form.addRow('إجمالي الرفع:', self.stats_total_label)
-
-        self.stats_success_label = QLabel('0')
-        stats_form.addRow('الناجحة:', self.stats_success_label)
-
-        self.stats_failed_label = QLabel('0')
-        stats_form.addRow('الفاشلة:', self.stats_failed_label)
-
-        # معدل النجاح
-        self.stats_success_rate_label = QLabel('0%')
-        stats_form.addRow('معدل النجاح:', self.stats_success_rate_label)
-
-        stats_group.setLayout(stats_form)
-        layout.addWidget(stats_group)
-
-        # الرسم البياني الأسبوعي
-        weekly_group = QGroupBox('الإحصائيات الأسبوعية')
-        if HAS_QTAWESOME:
-            weekly_group.setTitle('')
-        weekly_layout = QVBoxLayout()
-
-        # عنوان المجموعة مع أيقونة
-        if HAS_QTAWESOME:
-            weekly_title_row = QHBoxLayout()
-            weekly_icon_label = QLabel()
-            weekly_icon_label.setPixmap(get_icon(ICONS['chart'], ICON_COLORS.get('chart')).pixmap(16, 16))
-            weekly_title_row.addWidget(weekly_icon_label)
-            weekly_title_row.addWidget(QLabel('الإحصائيات الأسبوعية'))
-            weekly_title_row.addStretch()
-            weekly_layout.addLayout(weekly_title_row)
-
-        self.weekly_chart_text = QTextEdit()
-        self.weekly_chart_text.setReadOnly(True)
-        self.weekly_chart_text.setMaximumHeight(200)
-        self.weekly_chart_text.setStyleSheet('font-family: monospace; font-size: 12px;')
-        weekly_layout.addWidget(self.weekly_chart_text)
-
-        weekly_group.setLayout(weekly_layout)
-        layout.addWidget(weekly_group)
-
-        # جدول آخر الرفع
-        recent_group = QGroupBox('آخر الفيديوهات المرفوعة')
-        recent_layout = QVBoxLayout()
-
-        self.recent_uploads_table = QTableWidget()
-        self.recent_uploads_table.setColumnCount(4)
-        self.recent_uploads_table.setHorizontalHeaderLabels(['الملف', 'الصفحة', 'التاريخ', 'الحالة'])
-        self.recent_uploads_table.horizontalHeader().setStretchLastSection(True)
-        self.recent_uploads_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        recent_layout.addWidget(self.recent_uploads_table)
-
-        # صف الأزرار (تحديث وتصفير)
-        buttons_row = QHBoxLayout()
-
-        refresh_btn = create_icon_button('تحديث الإحصائيات', 'refresh')
-        refresh_btn.clicked.connect(self._refresh_stats)
-        buttons_row.addWidget(refresh_btn)
-
-        reset_btn = create_icon_button('تصفير الإحصائيات', 'delete')
-        reset_btn.clicked.connect(self._reset_stats)
-        buttons_row.addWidget(reset_btn)
-
-        recent_layout.addLayout(buttons_row)
-
-        recent_group.setLayout(recent_layout)
-        layout.addWidget(recent_group)
-
-        layout.addStretch()
-
-    def _refresh_stats(self):
-        """تحديث الإحصائيات من قاعدة البيانات."""
-        stats = get_upload_stats(days=30)
-
-        self.stats_total_label.setText(str(stats.get('total', 0)))
-        self.stats_success_label.setText(str(stats.get('successful', 0)))
-        self.stats_failed_label.setText(str(stats.get('failed', 0)))
-
-        # معدل النجاح
-        success_rate = stats.get('success_rate', 0)
-        self.stats_success_rate_label.setText(f'{success_rate:.1f}%')
-
-        # الرسم البياني الأسبوعي
-        weekly_stats = stats.get('weekly_stats', {})
-        if weekly_stats:
-            chart = generate_text_chart(weekly_stats)
-            self.weekly_chart_text.setText(chart)
-        else:
-            self.weekly_chart_text.setText('لا توجد بيانات للأسبوع الماضي')
-
-        # تحديث جدول آخر الرفع
-        recent = stats.get('recent', [])
-        self.recent_uploads_table.setRowCount(len(recent))
-
-        for row, item in enumerate(recent):
-            file_name, page_name, video_url, uploaded_at, status = item
-            self.recent_uploads_table.setItem(row, 0, QTableWidgetItem(file_name or ''))
-            self.recent_uploads_table.setItem(row, 1, QTableWidgetItem(page_name or ''))
-            self.recent_uploads_table.setItem(row, 2, QTableWidgetItem(uploaded_at or ''))
-            status_text = '✅ نجح' if status == 'success' else '❌ فشل'
-            self.recent_uploads_table.setItem(row, 3, QTableWidgetItem(status_text))
-
-    def _reset_stats(self):
-        """تصفير الإحصائيات بعد تأكيد المستخدم."""
-        reply = QMessageBox.question(
-            self,
-            'تأكيد التصفير',
-            'هل أنت متأكد من تصفير جميع الإحصائيات؟\nلا يمكن التراجع عن هذا الإجراء.',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
-            # تشغيل العملية في خيط منفصل لمنع تجميد الواجهة
-            def do_reset():
-                try:
-                    if reset_upload_stats():
-                        # استخدام signal لتحديث الواجهة من الخيط الرئيسي
-                        self.ui_signals.log_signal.emit('✅ تم تصفير الإحصائيات بنجاح')
-                        # تأخير قصير ثم تحديث العرض
-                        QTimer.singleShot(100, self._refresh_stats)
-                    else:
-                        self.ui_signals.log_signal.emit('❌ فشل تصفير الإحصائيات')
-                except Exception as e:
-                    self.ui_signals.log_signal.emit(f'❌ خطأ: {e}')
-
-            threading.Thread(target=do_reset, daemon=True).start()
-
-    def _build_settings_tab(self, layout):
-        """بناء تبويب الإعدادات المتقدمة."""
-        # تم إزالة مجموعة ساعات العمل من هنا (Requirement 4)
-        # لأن ساعات العمل موجودة بالفعل على الواجهة الرئيسية
-
-        # تم إزالة مجموعة العلامة المائية من الإعدادات العامة
-        # لأنها أصبحت موجودة في إعدادات كل مهمة فيديو
-
-        # مجموعة التحقق من الفيديو
-        validation_group = QGroupBox('التحقق من صحة الفيديو')
-        if HAS_QTAWESOME:
-            validation_group.setTitle('')
-        validation_form = QFormLayout()
-
-        # عنوان المجموعة مع أيقونة
-        if HAS_QTAWESOME:
-            val_title_row = QHBoxLayout()
-            val_icon_label = QLabel()
-            val_icon_label.setPixmap(get_icon(ICONS['warning'], ICON_COLORS.get('warning')).pixmap(16, 16))
-            val_title_row.addWidget(val_icon_label)
-            val_title_row.addWidget(QLabel('التحقق من صحة الفيديو'))
-            val_title_row.addStretch()
-            validation_form.addRow(val_title_row)
-
-        self.validate_videos_checkbox = QCheckBox('التحقق من الفيديوهات قبل الرفع')
-        self.validate_videos_checkbox.setChecked(self.validate_videos)
-        self.validate_videos_checkbox.setToolTip('فحص ملفات الفيديو للتأكد من صلاحيتها قبل محاولة الرفع')
-        validation_form.addRow(self.validate_videos_checkbox)
-
-        validation_group.setLayout(validation_form)
-        layout.addWidget(validation_group)
-
-        # مجموعة فحص الاتصال بالإنترنت
-        internet_group = QGroupBox('فحص الاتصال بالإنترنت')
-        if HAS_QTAWESOME:
-            internet_group.setTitle('')
-        internet_form = QFormLayout()
-
-        # عنوان المجموعة مع أيقونة
-        if HAS_QTAWESOME:
-            net_title_row = QHBoxLayout()
-            net_icon_label = QLabel()
-            net_icon_label.setPixmap(get_icon(ICONS['network'], ICON_COLORS.get('network')).pixmap(16, 16))
-            net_title_row.addWidget(net_icon_label)
-            net_title_row.addWidget(QLabel('فحص الاتصال بالإنترنت'))
-            net_title_row.addStretch()
-            internet_form.addRow(net_title_row)
-
-        self.internet_check_checkbox = QCheckBox('فحص الاتصال قبل كل عملية رفع')
-        if HAS_QTAWESOME:
-            self.internet_check_checkbox.setIcon(get_icon(ICONS['network'], ICON_COLORS.get('network')))
-        self.internet_check_checkbox.setChecked(self.internet_check_enabled)
-        self.internet_check_checkbox.setToolTip('عند تفعيل هذا الخيار، سيتحقق البرنامج من الاتصال بالإنترنت قبل كل رفع.\nإذا انقطع الاتصال، سيدخل في وضع الغفوة ويعيد المحاولة كل دقيقة حتى يعود الاتصال.')
-        internet_form.addRow(self.internet_check_checkbox)
-
-        internet_group.setLayout(internet_form)
-        layout.addWidget(internet_group)
-
-        # مجموعة إشعارات Telegram Bot
-        telegram_group = QGroupBox('إشعارات Telegram')
-        if HAS_QTAWESOME:
-            telegram_group.setTitle('')
-        telegram_layout = QVBoxLayout()
-
-        # عنوان المجموعة مع أيقونة
-        if HAS_QTAWESOME:
-            tg_title_row = QHBoxLayout()
-            tg_icon_label = QLabel()
-            tg_icon_label.setPixmap(get_icon(ICONS['telegram'], ICON_COLORS.get('telegram')).pixmap(16, 16))
-            tg_title_row.addWidget(tg_icon_label)
-            tg_title_row.addWidget(QLabel('إشعارات Telegram Bot'))
-            tg_title_row.addStretch()
-            telegram_layout.addLayout(tg_title_row)
-
-        # تفعيل الإشعارات
-        self.telegram_enabled_checkbox = QCheckBox('تفعيل إشعارات Telegram')
-        self.telegram_enabled_checkbox.setChecked(self.telegram_enabled)
-        self.telegram_enabled_checkbox.setToolTip('إرسال إشعارات عند نجاح أو فشل رفع الفيديو عبر Telegram Bot')
-        telegram_layout.addWidget(self.telegram_enabled_checkbox)
-
-        # خيارات أنواع الإشعارات
-        notify_options_layout = QVBoxLayout()
-        notify_options_layout.setContentsMargins(20, 5, 0, 5)  # إزاحة للداخل
-
-        # خيار إرسال إشعارات النجاح
-        self.telegram_notify_success_checkbox = QCheckBox('إرسال إشعارات نجاح الرفع ✅')
-        self.telegram_notify_success_checkbox.setChecked(getattr(self, 'telegram_notify_success', True))
-        self.telegram_notify_success_checkbox.setToolTip('إرسال إشعار عند نجاح رفع فيديو أو ستوري أو ريلز')
-        notify_options_layout.addWidget(self.telegram_notify_success_checkbox)
-
-        # خيار إرسال إشعارات الأخطاء
-        self.telegram_notify_errors_checkbox = QCheckBox('إرسال إشعارات الأخطاء والفشل ❌')
-        self.telegram_notify_errors_checkbox.setChecked(getattr(self, 'telegram_notify_errors', True))
-        self.telegram_notify_errors_checkbox.setToolTip('إرسال إشعار عند فشل الرفع أو حدوث أي خطأ في البرنامج')
-        notify_options_layout.addWidget(self.telegram_notify_errors_checkbox)
-
-        telegram_layout.addLayout(notify_options_layout)
-
-        # حقول الإعدادات
-        telegram_form = QFormLayout()
-
-        # توكن البوت
-        self.telegram_bot_token_input = QLineEdit()
-        self.telegram_bot_token_input.setPlaceholderText('أدخل توكن البوت من @BotFather')
-        self.telegram_bot_token_input.setText(self.telegram_bot_token)
-        self.telegram_bot_token_input.setEchoMode(QLineEdit.Password)
-        telegram_form.addRow('توكن البوت:', self.telegram_bot_token_input)
-
-        # معرّف المحادثة
-        self.telegram_chat_id_input = QLineEdit()
-        self.telegram_chat_id_input.setPlaceholderText('معرّف المحادثة أو القناة (مثل: -1001234567890)')
-        self.telegram_chat_id_input.setText(self.telegram_chat_id)
-        telegram_form.addRow('معرّف المحادثة:', self.telegram_chat_id_input)
-
-        telegram_layout.addLayout(telegram_form)
-
-        # صف أزرار Telegram
-        telegram_buttons_row = QHBoxLayout()
-
-        # زر اختبار الاتصال
-        self.telegram_test_btn = create_icon_button('اختبار الاتصال', 'telegram')
-        self.telegram_test_btn.clicked.connect(self._test_telegram_connection)
-        telegram_buttons_row.addWidget(self.telegram_test_btn)
-
-        # تعليمات الحصول على التوكن
-        telegram_help_btn = create_icon_button('كيفية الإعداد؟', 'info')
-        telegram_help_btn.clicked.connect(self._show_telegram_help)
-        telegram_buttons_row.addWidget(telegram_help_btn)
-
-        telegram_layout.addLayout(telegram_buttons_row)
-
-        # رسالة الحالة
-        self.telegram_status_label = QLabel('')
-        self.telegram_status_label.setAlignment(Qt.AlignCenter)
-        self.telegram_status_label.setWordWrap(True)
-        telegram_layout.addWidget(self.telegram_status_label)
-
-        telegram_group.setLayout(telegram_layout)
-        layout.addWidget(telegram_group)
-
-        # مجموعة تحديث المكتبات
-        updates_group = QGroupBox('تحديث المكتبات')
-        if HAS_QTAWESOME:
-            updates_group.setTitle('')
-        updates_layout = QVBoxLayout()
-
-        # عنوان المجموعة مع أيقونة
-        if HAS_QTAWESOME:
-            updates_title_row = QHBoxLayout()
-            updates_icon_label = QLabel()
-            updates_icon_label.setPixmap(get_icon(ICONS['update'], ICON_COLORS.get('update')).pixmap(16, 16))
-            updates_title_row.addWidget(updates_icon_label)
-            updates_title_row.addWidget(QLabel('تحديث المكتبات'))
-            updates_title_row.addStretch()
-            updates_layout.addLayout(updates_title_row)
-
-        # جدول المكتبات
-        self.updates_table = QTableWidget()
-        self.updates_table.setColumnCount(4)
-        self.updates_table.setHorizontalHeaderLabels(['المكتبة', 'الحالي', 'المتاح', 'الحالة'])
-        self.updates_table.horizontalHeader().setStretchLastSection(True)
-        self.updates_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.updates_table.setMaximumHeight(150)
-        updates_layout.addWidget(self.updates_table)
-
-        # رسالة الحالة
-        self.update_status_label = QLabel('اضغط على "البحث عن تحديثات" للتحقق')
-        self.update_status_label.setAlignment(Qt.AlignCenter)
-        updates_layout.addWidget(self.update_status_label)
-
-        # أزرار التحديث
-        update_buttons_row = QHBoxLayout()
-
-        self.check_updates_btn = create_icon_button('البحث عن تحديثات', 'search')
-        self.check_updates_btn.clicked.connect(self._check_for_updates)
-        update_buttons_row.addWidget(self.check_updates_btn)
-
-        self.update_all_btn = create_icon_button('تحديث الكل', 'update', color=COUNTDOWN_COLOR_GREEN)
-        self.update_all_btn.clicked.connect(self._run_updates)
-        self.update_all_btn.setVisible(False)  # يظهر فقط عند وجود تحديثات
-        self.update_all_btn.setStyleSheet(f'background-color: {COUNTDOWN_COLOR_GREEN}; color: white; font-weight: bold;')
-        update_buttons_row.addWidget(self.update_all_btn)
-
-        updates_layout.addLayout(update_buttons_row)
-        updates_group.setLayout(updates_layout)
-        layout.addWidget(updates_group)
-
-        # تخزين قائمة التحديثات المتاحة
-        self._available_updates = []
-
-        # زر حفظ الإعدادات
-        save_settings_btn = create_icon_button('حفظ الإعدادات', 'save')
-        save_settings_btn.clicked.connect(self._save_advanced_settings)
-        layout.addWidget(save_settings_btn)
-
-        layout.addStretch()
-
-    def _save_advanced_settings(self):
-        """حفظ الإعدادات المتقدمة."""
-        # التحقق من الفيديو
-        self.validate_videos = self.validate_videos_checkbox.isChecked()
-
-        # فحص الاتصال بالإنترنت
-        self.internet_check_enabled = self.internet_check_checkbox.isChecked()
-
-        # إعدادات Telegram Bot
-        self.telegram_enabled = self.telegram_enabled_checkbox.isChecked()
-        self.telegram_bot_token = self.telegram_bot_token_input.text().strip()
-        self.telegram_chat_id = self.telegram_chat_id_input.text().strip()
-        self.telegram_notify_success = self.telegram_notify_success_checkbox.isChecked()
-        self.telegram_notify_errors = self.telegram_notify_errors_checkbox.isChecked()
-
+    def _run_updates_from_tab(self):
+        """Run updates requested from settings tab"""
+        self._available_updates = self.settings_tab.get_available_updates()
+        self._run_updates()
+    
+    def _on_settings_tab_changed(self):
+        """معالج تغيير إعدادات من تبويب الإعدادات"""
+        # Get settings from the tab
+        settings = self.settings_tab.get_settings()
+        
+        # Update main window attributes
+        self.validate_videos = settings['validate_videos']
+        self.internet_check_enabled = settings['internet_check_enabled']
+        self.telegram_enabled = settings['telegram_enabled']
+        self.telegram_bot_token = settings['telegram_bot_token']
+        self.telegram_chat_id = settings['telegram_chat_id']
+        self.telegram_notify_success = settings['telegram_notify_success']
+        self.telegram_notify_errors = settings['telegram_notify_errors']
+        
         # تحديث مثيل TelegramNotifier
         telegram_notifier.enabled = self.telegram_enabled
         telegram_notifier.bot_token = self.telegram_bot_token
         telegram_notifier.chat_id = self.telegram_chat_id
         telegram_notifier.notify_success = self.telegram_notify_success
         telegram_notifier.notify_errors = self.telegram_notify_errors
-
+        
+        # Save settings
         self._save_settings()
-        self._log_append('تم حفظ الإعدادات المتقدمة.')
-
-    def _test_telegram_connection(self):
-        """اختبار الاتصال بـ Telegram Bot."""
-        # حفظ الإعدادات المؤقتة
-        bot_token = self.telegram_bot_token_input.text().strip()
-        chat_id = self.telegram_chat_id_input.text().strip()
-
-        if not bot_token or not chat_id:
-            self.telegram_status_label.setText('❌ يرجى إدخال توكن البوت ومعرّف المحادثة')
-            self.telegram_status_label.setStyleSheet('color: #F44336;')
-            return
-
-        self.telegram_test_btn.setEnabled(False)
-        self.telegram_test_btn.setText('جاري الاختبار...')
-        self.telegram_status_label.setText('⏳ جاري اختبار الاتصال...')
-        self.telegram_status_label.setStyleSheet('')
-
-        def test_worker():
-            # إنشاء مثيل مؤقت للاختبار
-            test_notifier = TelegramNotifier(bot_token, chat_id, enabled=True)
-            success, message = test_notifier.test_connection()
-
-            # استخدام Signal بدلاً من QTimer لضمان تحديث الواجهة من الخيط الرئيسي
-            self.ui_signals.telegram_test_result.emit(success, message)
-
-        threading.Thread(target=test_worker, daemon=True).start()
-
+    
     def _update_telegram_test_result(self, success: bool, message: str):
-        """تحديث نتيجة اختبار Telegram."""
-        self.telegram_test_btn.setEnabled(True)
-        self.telegram_test_btn.setText('اختبار الاتصال')
-        if HAS_QTAWESOME:
-            self.telegram_test_btn.setIcon(get_icon(ICONS['telegram'], ICON_COLORS.get('telegram')))
-
-        if success:
-            self.telegram_status_label.setText(f'✅ {message}')
-            self.telegram_status_label.setStyleSheet('color: #4CAF50;')
-            # حفظ الإعدادات تلقائياً عند نجاح اختبار الاتصال
-            self.telegram_bot_token = self.telegram_bot_token_input.text().strip()
-            self.telegram_chat_id = self.telegram_chat_id_input.text().strip()
-            self.telegram_enabled = self.telegram_enabled_checkbox.isChecked()
-            self.telegram_notify_success = self.telegram_notify_success_checkbox.isChecked()
-            self.telegram_notify_errors = self.telegram_notify_errors_checkbox.isChecked()
-            # تحديث مثيل TelegramNotifier
-            telegram_notifier.enabled = self.telegram_enabled
-            telegram_notifier.bot_token = self.telegram_bot_token
-            telegram_notifier.chat_id = self.telegram_chat_id
-            telegram_notifier.notify_success = self.telegram_notify_success
-            telegram_notifier.notify_errors = self.telegram_notify_errors
-            # حفظ الإعدادات
-            self._save_settings()
-            self._log_append('✅ تم حفظ إعدادات Telegram بنجاح بعد اختبار الاتصال')
-        else:
-            self.telegram_status_label.setText(f'❌ {message}')
-            self.telegram_status_label.setStyleSheet('color: #F44336;')
-            # إظهار نافذة منبثقة عند فشل الاتصال
-            QMessageBox.warning(
-                self,
-                'فشل الاتصال بـ Telegram',
-                f'لم يتم الاتصال بالبوت:\n\n{message}\n\n'
-                'تأكد من:\n'
-                '• صحة التوكن\n'
-                '• صحة معرّف المحادثة\n'
-                '• اتصالك بالإنترنت'
-            )
-
-    def _show_telegram_help(self):
-        """عرض تعليمات إعداد Telegram Bot."""
-        help_text = '''
-<h3>كيفية إعداد إشعارات Telegram Bot</h3>
-
-<h4>1. إنشاء بوت جديد:</h4>
-<ol>
-<li>افتح تطبيق Telegram وابحث عن <b>@BotFather</b></li>
-<li>أرسل الأمر <code>/newbot</code></li>
-<li>اختر اسماً للبوت (مثل: My Upload Notifier)</li>
-<li>اختر username للبوت (يجب أن ينتهي بـ bot)</li>
-<li>ستحصل على <b>توكن البوت</b> - انسخه</li>
-</ol>
-
-<h4>2. الحصول على معرّف المحادثة (Chat ID):</h4>
-<p><b>للمحادثة الشخصية:</b></p>
-<ol>
-<li>ابحث عن <b>@userinfobot</b> في Telegram</li>
-<li>اضغط Start</li>
-<li>سيظهر لك الـ <b>Id</b> الخاص بك</li>
-</ol>
-
-<p><b>للمجموعة أو القناة:</b></p>
-<ol>
-<li>أضف البوت للمجموعة/القناة كمشرف</li>
-<li>أرسل رسالة في المجموعة</li>
-<li>افتح الرابط: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code></li>
-<li>ابحث عن "chat":{"id": وانسخ الرقم (يبدأ عادة بـ -100)</li>
-</ol>
-
-<h4>3. ملاحظات:</h4>
-<ul>
-<li>تأكد من بدء محادثة مع البوت أولاً (اضغط /start)</li>
-<li>معرّف القنوات يبدأ عادة بـ <code>-100</code></li>
-<li>يمكن استخدام @username بدلاً من الـ ID للقنوات العامة</li>
-</ul>
-'''
-        QMessageBox.information(self, 'تعليمات Telegram Bot', help_text)
-
-    def _check_for_updates(self):
-        """
-        Check for library updates.
-        التحقق من وجود تحديثات للمكتبات.
-        """
-        self.check_updates_btn.setEnabled(False)
-        self.check_updates_btn.setText('جاري البحث...')
-        self.update_status_label.setText('جاري التحقق من التحديثات...')
-        self.updates_table.setRowCount(0)
-        self.update_all_btn.setVisible(False)
-        self._available_updates = []
-
-        # استخدام متغير للتخزين المؤقت
-        self._update_check_result = {'installed': {}, 'updates': [], 'error': None}
-
-        def check_worker():
-            try:
-                self.ui_signals.log_signal.emit('🔍 جاري التحقق من التحديثات...')
-
-                # الحصول على الإصدارات المثبتة
-                installed = get_installed_versions()
-                self._update_check_result['installed'] = installed
-
-                # الحصول على التحديثات المتاحة
-                updates = check_for_updates(None)  # بدون log لتجنب مشاكل الخيوط
-                self._update_check_result['updates'] = updates
-
-                self.ui_signals.log_signal.emit(f'✅ تم التحقق - وُجدت {len(updates)} تحديثات')
-
-            except Exception as e:
-                self._update_check_result['error'] = str(e)
-                self.ui_signals.log_signal.emit(f'❌ خطأ في التحقق: {e}')
-            finally:
-                # استخدام Signal بدلاً من QTimer لضمان تحديث الواجهة من الخيط الرئيسي
-                self.ui_signals.update_check_finished.emit()
-
-        threading.Thread(target=check_worker, daemon=True).start()
-
+        """تحديث نتيجة اختبار Telegram - delegates to SettingsTab"""
+        # The SettingsTab has its own handler connected to its own signal
+        # This is just a stub for any legacy code that might still use the old signal
+        pass
+    
     def _finish_update_check(self):
-        """إنهاء عملية التحقق من التحديثات وتحديث الواجهة."""
-        try:
-            result = getattr(self, '_update_check_result', {})
-
-            if result.get('error'):
-                self._handle_update_check_error(result['error'])
-                return
-
-            installed = result.get('installed', {})
-            updates = result.get('updates', [])
-
-            self._populate_updates_table(installed, updates)
-
-        except Exception as e:
-            self._handle_update_check_error(str(e))
-
-    def _handle_update_check_error(self, error_msg: str):
-        """معالجة خطأ التحقق من التحديثات."""
-        self.check_updates_btn.setEnabled(True)
-        self.check_updates_btn.setText('البحث عن تحديثات')
-        if HAS_QTAWESOME:
-            self.check_updates_btn.setIcon(get_icon(ICONS.get('search', 'fa5s.search'), ICON_COLORS.get('search')))
-        self.update_status_label.setText(f'❌ خطأ في التحقق: {error_msg[:80]}')
-        self._log_append(f'❌ فشل التحقق من التحديثات: {error_msg}')
-
-        # إظهار نافذة منبثقة للخطأ مع تفاصيل الخطأ
-        error_detail = error_msg[:200] if len(error_msg) > 200 else error_msg
-        QMessageBox.warning(
-            self,
-            '❌ خطأ في التحقق',
-            f'تعذر التحقق من التحديثات.\nتأكد من اتصالك بالإنترنت.\n\nتفاصيل الخطأ:\n{error_detail}',
-            QMessageBox.Ok
-        )
-
-    def _populate_updates_table(self, installed: dict, updates: list):
-        """ملء جدول التحديثات بالبيانات."""
-        try:
-            # إنشاء قاموس التحديثات المتاحة
-            updates_dict = {pkg[0].lower(): (pkg[1], pkg[2]) for pkg in updates}
-            self._available_updates = [pkg[0] for pkg in updates]
-
-            # ملء الجدول
-            self.updates_table.setRowCount(len(UPDATE_PACKAGES))
-
-            for row, pkg_name in enumerate(UPDATE_PACKAGES):
-                # اسم المكتبة
-                self.updates_table.setItem(row, 0, QTableWidgetItem(pkg_name))
-
-                # الإصدار الحالي
-                current_version = installed.get(pkg_name, 'غير مثبت')
-                # البحث بغض النظر عن حالة الأحرف
-                for key, value in installed.items():
-                    if key.lower() == pkg_name.lower():
-                        current_version = value
-                        break
-                self.updates_table.setItem(row, 1, QTableWidgetItem(current_version))
-
-                # الإصدار المتاح والحالة
-                if pkg_name.lower() in updates_dict:
-                    _, latest_version = updates_dict[pkg_name.lower()]
-                    self.updates_table.setItem(row, 2, QTableWidgetItem(latest_version))
-                    status_item = QTableWidgetItem('تحديث متاح')
-                    status_item.setForeground(QColor(COUNTDOWN_COLOR_YELLOW))  # أصفر/برتقالي
-                    self.updates_table.setItem(row, 3, status_item)
-                else:
-                    self.updates_table.setItem(row, 2, QTableWidgetItem(current_version))
-                    status_item = QTableWidgetItem('محدث')
-                    status_item.setForeground(QColor(COUNTDOWN_COLOR_GREEN))  # أخضر
-                    self.updates_table.setItem(row, 3, status_item)
-
-            # تحديث رسالة الحالة وزر التحديث
-            if updates:
-                self.update_status_label.setText(f'⚠️ يوجد {len(updates)} تحديثات متاحة')
-                self.update_all_btn.setVisible(True)
-
-                # إنشاء قائمة التحديثات للعرض في الرسالة
-                updates_list = '\n'.join([
-                    f'• {pkg[0]}: {pkg[1]} → {pkg[2]}'
-                    for pkg in updates
-                ])
-
-                # إظهار نافذة منبثقة تسأل المستخدم إذا أراد التحديث الآن
-                # ملاحظة: يتم تضمين تحذير إغلاق البرنامج في هذه الرسالة
-                reply = QMessageBox.question(
-                    self,
-                    '⚠️ تحديثات متاحة',
-                    f'يوجد {len(updates)} تحديثات للمكتبات التالية:\n\n{updates_list}\n\n'
-                    'سيتم إغلاق البرنامج لإتمام التحديث.\nهل تريد التحديث الآن؟',
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-
-                if reply == QMessageBox.Yes:
-                    # تشغيل التحديث مباشرة (بدون نافذة تأكيد إضافية)
-                    self._run_updates(skip_confirmation=True)
-            else:
-                self.update_status_label.setText('✅ جميع المكتبات محدثة - لا توجد تحديثات متاحة')
-                self.update_all_btn.setVisible(False)
-
-                # إظهار نافذة منبثقة عند عدم وجود تحديثات
-                QMessageBox.information(
-                    self,
-                    '✅ لا توجد تحديثات',
-                    'جميع المكتبات محدثة!\nأنت تستخدم أحدث الإصدارات.',
-                    QMessageBox.Ok
-                )
-        except Exception as e:
-            self.update_status_label.setText(f'❌ خطأ: {str(e)[:80]}')
-        finally:
-            # دائماً إعادة الزر للحالة الطبيعية
-            self.check_updates_btn.setEnabled(True)
-            self.check_updates_btn.setText('البحث عن تحديثات')
-            if HAS_QTAWESOME:
-                self.check_updates_btn.setIcon(get_icon(ICONS.get('search', 'fa5s.search'), ICON_COLORS.get('search')))
-
-    def _reset_update_ui(self):
-        """إعادة تعيين واجهة التحديث عند حدوث خطأ."""
-        self.check_updates_btn.setEnabled(True)
-        if HAS_QTAWESOME:
-            self.check_updates_btn.setIcon(get_icon(ICONS.get('search', 'fa5s.search'), ICON_COLORS.get('search')))
-        self.check_updates_btn.setText('البحث عن تحديثات')
-        self.update_status_label.setText('حدث خطأ أثناء التحقق من التحديثات')
-
+        """إنهاء عملية التحقق من التحديثات وتحديث الواجهة - delegates to SettingsTab"""
+        # The actual work is done in SettingsTab's _finish_update_check
+        # This is just a passthrough since the signal is connected here
+        pass
+    
     def _run_updates(self, skip_confirmation: bool = False):
         """
         تشغيل عملية التحديث باستخدام updater.py المنفصل.
