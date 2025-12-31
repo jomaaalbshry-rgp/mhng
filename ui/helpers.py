@@ -100,6 +100,18 @@ except ImportError:
     HAS_QTAWESOME = False
 
 
+# محاولة استيراد qdarktheme للثيمات الداكنة/الفاتحة
+# Try to import qdarktheme for dark/light themes
+HAS_QDARKTHEME = False
+qdarktheme = None
+try:
+    import qdarktheme
+    HAS_QDARKTHEME = True
+except ImportError:
+    HAS_QDARKTHEME = False
+    qdarktheme = None
+
+
 def get_icon(icon_name: str, color: str = None, fallback_text: str = '') -> QIcon:
     """
     الحصول على أيقونة qtawesome أو أيقونة فارغة كبديل.
@@ -580,6 +592,7 @@ __all__ = [
     'ICONS',
     'ICON_COLORS',
     'HAS_QTAWESOME',
+    'HAS_QDARKTHEME',
     # Formatting functions
     'mask_token',
     'seconds_to_value_unit',
