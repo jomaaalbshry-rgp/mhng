@@ -10,8 +10,11 @@ import random
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from core.jobs.video_job import PageJob
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.jobs.video_job import PageJob
+
 from core.utils import run_subprocess
 from core.constants import MAX_VIDEO_DURATION_SECONDS
 from controllers.story_controller import get_random_emoji
@@ -224,7 +227,7 @@ def validate_video(video_path: str, log_fn=None) -> dict:
     return result
 
 
-def apply_template(template_str, page_job: PageJob, filename: str, file_index: int, total_files: int):
+def apply_template(template_str, page_job: 'PageJob', filename: str, file_index: int, total_files: int):
     """
     تطبيق قالب على النص مع استبدال المتغيرات.
 

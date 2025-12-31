@@ -7,7 +7,11 @@ Upload helper functions for video, story, and reels uploads.
 import os
 import requests
 from pathlib import Path
-from core.jobs.video_job import PageJob
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.jobs.video_job import PageJob
+
 from core.video_utils import clean_filename_for_title, apply_template
 from core.constants import (
     CHUNK_SIZE_DEFAULT, RESUMABLE_THRESHOLD_BYTES,
@@ -24,7 +28,7 @@ from services.upload_service import UploadService
 _upload_service = UploadService()
 
 
-def resumable_upload(page_job: PageJob, video_path, token, ui_signals: UiSignals,
+def resumable_upload(page_job: 'PageJob', video_path, token, ui_signals: UiSignals,
                      final_title="", final_description=""):
     """
     رفع فيديو بشكل مجزأ إلى فيسبوك.
@@ -58,7 +62,7 @@ def resumable_upload(page_job: PageJob, video_path, token, ui_signals: UiSignals
     )
 
 
-def apply_watermark_to_video(video_path: str, job: PageJob, log_fn) -> str:
+def apply_watermark_to_video(video_path: str, job: 'PageJob', log_fn) -> str:
     """
     تطبيق العلامة المائية على الفيديو إذا كانت مفعلة بشكل آمن.
     Apply watermark to video if enabled.
@@ -123,7 +127,7 @@ def cleanup_temp_watermark_file(video_path: str, original_path: str, log_fn=None
     )
 
 
-def upload_video_once(page_job: PageJob, video_path, token, ui_signals: UiSignals,
+def upload_video_once(page_job: 'PageJob', video_path, token, ui_signals: UiSignals,
                       title_tmpl, desc_tmpl, log_fn):
     """
     رفع فيديو واحد إلى فيسبوك مع دعم العلامة المائية.
