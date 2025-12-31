@@ -31,10 +31,17 @@ from core import get_logger, log_info, log_error, log_warning, log_debug
 import requests
 
 # استيراد وحدات قاعدة البيانات والتشفير الآمن
-# Note: DatabaseManager and get_database_manager are imported for future refactoring
-# when all direct sqlite3.connect() calls will be replaced with the unified manager.
-# Currently, simple_encrypt/simple_decrypt use secure_encrypt/secure_decrypt.
 from services import DatabaseManager, get_database_manager, initialize_database
+# استيراد وحدة الوصول إلى البيانات - Import data access module
+from services import (
+    get_settings_file, get_jobs_file, get_database_file, migrate_old_files,
+    save_hashtag_group, get_hashtag_groups, delete_hashtag_group,
+    is_within_working_hours, calculate_time_to_working_hours_start,
+    log_upload, get_upload_stats, reset_upload_stats, generate_text_chart,
+    init_default_templates, ensure_default_templates,
+    get_all_templates, get_template_by_id, save_template, delete_template,
+    get_default_template, set_default_template, get_schedule_times_for_template
+)
 from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_decrypt
 
 # استيراد الوحدات المنفصلة للفيديو والستوري والريلز
@@ -86,7 +93,10 @@ from ui.dialogs import HashtagManagerDialog as HashtagManagerDialogBase
 from ui.helpers import (
     create_fallback_icon, load_app_icon, get_icon,
     create_icon_button, create_icon_action,
-    ICONS, ICON_COLORS, HAS_QTAWESOME
+    ICONS, ICON_COLORS, HAS_QTAWESOME,
+    # Import formatting functions
+    mask_token, seconds_to_value_unit, format_remaining_time,
+    format_time_12h, format_datetime_12h
 )
 from ui.components import JobsTable, LogViewer, LogLevel, ProgressWidget
 
@@ -140,68 +150,8 @@ except Exception:
 
 # APP_TITLE and APP_DATA_FOLDER have been moved to core/constants.py
 
-
-def _get_appdata_folder() -> Path:
-    """
-    الحصول على مسار مجلد AppData للتطبيق.
-
-    العائد:
-        مسار المجلد في AppData/Roaming (ويندوز) أو ~/.config (لينكس/ماك)
-    """
-    if sys.platform == 'win32':
-        appdata = os.environ.get('APPDATA', '')
-        if appdata:
-            return Path(appdata) / APP_DATA_FOLDER
-    # Fallback لأنظمة أخرى
-    home = Path.home()
-    return home / '.config' / APP_DATA_FOLDER
-
-
-def _get_settings_file() -> Path:
-    """الحصول على مسار ملف الإعدادات في AppData."""
-    folder = _get_appdata_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / "fb_scheduler_settings.json"
-
-
-def _get_jobs_file() -> Path:
-    """الحصول على مسار ملف الوظائف في AppData."""
-    folder = _get_appdata_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / "fb_scheduler_jobs.json"
-
-
-def _migrate_old_files():
-    """
-    ترحيل الملفات القديمة (بجانب exe/السكربت) إلى AppData.
-
-    يتم نسخ الملفات مرة واحدة فقط إذا كانت موجودة في الموقع القديم
-    ولم تكن موجودة في الموقع الجديد.
-    """
-    script_dir = Path(__file__).parent.resolve()
-    old_settings = script_dir / "fb_scheduler_settings.json"
-    old_jobs = script_dir / "fb_scheduler_jobs.json"
-
-    new_settings = _get_settings_file()
-    new_jobs = _get_jobs_file()
-
-    # ترحيل ملف الإعدادات
-    if old_settings.exists() and not new_settings.exists():
-        try:
-            shutil.copy2(old_settings, new_settings)
-        except Exception:
-            pass
-
-    # ترحيل ملف الوظائف
-    if old_jobs.exists() and not new_jobs.exists():
-        try:
-            shutil.copy2(old_jobs, new_jobs)
-        except Exception:
-            pass
-
-
-# تنفيذ الترحيل عند تحميل الوحدة
-_migrate_old_files()
+# تنفيذ الترحيل عند تحميل الوحدة - Execute migration when module loads
+migrate_old_files()
 
 # ==================== Constants ====================
 # All constants have been moved to core/constants.py
@@ -209,160 +159,17 @@ _migrate_old_files()
 
 
 # ==================== SQLite Database ====================
-
-def _get_database_file() -> Path:
-    """الحصول على مسار قاعدة بيانات SQLite."""
-    folder = _get_appdata_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / "page_management.db"
-
-
-def init_database():
-    """
-    تهيئة قاعدة بيانات SQLite وإنشاء الجداول اللازمة.
-    """
-    db_path = _get_database_file()
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    # جدول الوظائف
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS jobs (
-            page_id TEXT PRIMARY KEY,
-            page_name TEXT,
-            folder TEXT,
-            interval_seconds INTEGER,
-            page_access_token TEXT,
-            next_index INTEGER DEFAULT 0,
-            title_template TEXT,
-            description_template TEXT,
-            chunk_size INTEGER,
-            use_filename_as_title INTEGER DEFAULT 0,
-            enabled INTEGER DEFAULT 1,
-            is_scheduled INTEGER DEFAULT 0,
-            next_run_timestamp REAL,
-            job_type TEXT DEFAULT 'video',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول مهام الستوري
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS story_jobs (
-            page_id TEXT PRIMARY KEY,
-            page_name TEXT,
-            folder TEXT,
-            interval_seconds INTEGER,
-            page_access_token TEXT,
-            next_index INTEGER DEFAULT 0,
-            stories_per_schedule INTEGER DEFAULT 10,
-            sort_by TEXT DEFAULT 'name',
-            enabled INTEGER DEFAULT 1,
-            is_scheduled INTEGER DEFAULT 0,
-            next_run_timestamp REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول الإعدادات
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-
-    # جدول سجل الرفع
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS upload_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            page_id TEXT,
-            page_name TEXT,
-            file_path TEXT,
-            file_name TEXT,
-            upload_type TEXT DEFAULT 'video',
-            video_id TEXT,
-            video_url TEXT,
-            status TEXT,
-            error_message TEXT,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول مجموعات الهاشتاجات
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hashtag_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            hashtags TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول ساعات العمل
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS working_hours (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            page_id TEXT,
-            start_time TEXT DEFAULT '09:00',
-            end_time TEXT DEFAULT '23:00',
-            enabled INTEGER DEFAULT 0,
-            apply_globally INTEGER DEFAULT 0
-        )
-    ''')
-
-    # جدول إعدادات العلامة المائية
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS watermark_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            page_id TEXT,
-            logo_path TEXT,
-            position TEXT DEFAULT 'bottom_right',
-            opacity REAL DEFAULT 0.8,
-            enabled INTEGER DEFAULT 0
-        )
-    ''')
-
-    # جدول قوالب الجداول الذكية (النظام الجديد)
-    # [DB] تم تحديث القيمة الافتراضية لـ days لاستخدام صيغة نصية للتوافق مع database_manager.py
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS schedule_templates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            times TEXT NOT NULL,
-            days TEXT DEFAULT '["sat", "sun", "mon", "tue", "wed", "thu", "fri"]',
-            random_offset INTEGER DEFAULT 15,
-            is_default BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # جدول التطبيقات والتوكينات (نظام إدارة التوكينات الجديد)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS app_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_name TEXT NOT NULL,
-            app_id TEXT NOT NULL,
-            app_secret TEXT,
-            short_lived_token TEXT,
-            long_lived_token TEXT,
-            token_expires_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
+# Database path and init functions moved to services/data_access.py
+# Note: init_database() is imported from services above
 
 def migrate_json_to_sqlite():
     """
     ترحيل البيانات من ملفات JSON إلى SQLite عند أول تشغيل.
+    Migrate data from JSON files to SQLite on first run.
     """
-    db_path = _get_database_file()
-    jobs_file = _get_jobs_file()
-    settings_file = _get_settings_file()
+    db_path = get_database_file()
+    jobs_file = get_jobs_file()
+    settings_file = get_settings_file()
 
     # التحقق من وجود بيانات للترحيل
     if not jobs_file.exists() and not settings_file.exists():
@@ -441,7 +248,7 @@ def get_all_app_tokens() -> list:
         قائمة من القواميس تحتوي على بيانات التطبيقات
         List of dictionaries containing app data
     """
-    return FacebookAPIService.get_all_app_tokens(_get_database_file(), simple_decrypt)
+    return FacebookAPIService.get_all_app_tokens(get_database_file(), simple_decrypt)
 
 
 def save_app_token(app_name: str, app_id: str, app_secret: str = '',
@@ -465,7 +272,7 @@ def save_app_token(app_name: str, app_id: str, app_secret: str = '',
         tuple: (success: bool, record ID: int or None)
     """
     return FacebookAPIService.save_app_token(
-        _get_database_file(), simple_encrypt, app_name, app_id, app_secret,
+        get_database_file(), simple_encrypt, app_name, app_id, app_secret,
         short_lived_token, long_lived_token, token_expires_at, token_id
     )
 
@@ -481,7 +288,7 @@ def delete_app_token(token_id: int) -> bool:
     العائد:
         True إذا نجح الحذف - True if deletion successful
     """
-    return FacebookAPIService.delete_app_token(_get_database_file(), token_id)
+    return FacebookAPIService.delete_app_token(get_database_file(), token_id)
 
 
 def exchange_token_for_long_lived(app_id: str, app_secret: str,
