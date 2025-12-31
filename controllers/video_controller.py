@@ -5,6 +5,11 @@ Manages video upload and publishing logic
 
 هذه الوحدة تحتوي على جميع الوظائف والمنطق الخاص بمهام رفع الفيديوهات.
 This module contains all functions and logic for video upload tasks.
+
+Note: PageJob is a backward-compatible alias for VideoJob. It exists to support
+older code that imports PageJob from this module. For new code, use VideoJob.
+There is also a separate PageJob class in ui/main_window.py with additional
+UI-specific features (watermarking, etc.) that is used in the UI layer.
 """
 
 import os

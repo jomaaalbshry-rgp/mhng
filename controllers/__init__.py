@@ -1,6 +1,10 @@
 """
 المتحكمات - طبقة التحكم في المنطق
 Controllers - Business logic layer
+
+Note: This module exports both VideoJob and PageJob. PageJob is a backward-compatible
+alias for VideoJob, provided to support older code that imports PageJob from 
+controllers.video_controller. Both names refer to the same class.
 """
 
 # Export controllers
