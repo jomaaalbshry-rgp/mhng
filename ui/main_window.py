@@ -95,7 +95,7 @@ from ui.dialogs import HashtagManagerDialog as HashtagManagerDialogBase
 from ui.helpers import (
     create_fallback_icon, load_app_icon, get_icon,
     create_icon_button, create_icon_action,
-    ICONS, ICON_COLORS, HAS_QTAWESOME,
+    ICONS, ICON_COLORS, HAS_QTAWESOME, HAS_QDARKTHEME,
     # Import formatting functions
     mask_token, seconds_to_value_unit, format_remaining_time,
     format_time_12h, format_datetime_12h,
@@ -117,13 +117,9 @@ from ui.signals import UiSignals
 # استيراد واجهة المجدول - Import Scheduler UI
 from ui.scheduler_ui import SchedulerUI
 
-# محاولة استيراد qdarktheme للثيم الداكن
-# Try to import qdarktheme for dark theme support
-try:
+# Import qdarktheme if available (for apply_theme function)
+if HAS_QDARKTHEME:
     import qdarktheme
-    HAS_QDARKTHEME = True
-except ImportError:
-    HAS_QDARKTHEME = False
 
 
 # ==================== Constants and Module Initialization ====================

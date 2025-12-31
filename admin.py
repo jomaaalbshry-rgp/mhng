@@ -16,17 +16,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from ui.helpers import load_app_icon, _set_windows_app_id
+from ui.helpers import load_app_icon, _set_windows_app_id, HAS_QDARKTHEME
 from core import SingleInstanceManager, SINGLE_INSTANCE_BASE_NAME, APP_TITLE
 from services import initialize_database
 
-
-# محاولة استيراد qdarktheme للثيم الداكن
-try:
+# Import qdarktheme if available
+if HAS_QDARKTHEME:
     import qdarktheme
-    HAS_QDARKTHEME = True
-except ImportError:
-    HAS_QDARKTHEME = False
 
 
 def main():

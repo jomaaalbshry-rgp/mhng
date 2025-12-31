@@ -13,37 +13,59 @@ def test_has_qdarktheme_guard():
     print("Testing HAS_QDARKTHEME guard in ui/main_window.py...")
     
     main_window_path = os.path.join(os.path.dirname(__file__), 'ui', 'main_window.py')
+    helpers_path = os.path.join(os.path.dirname(__file__), 'ui', 'helpers.py')
     
     if not os.path.exists(main_window_path):
         print(f"❌ File not found: {main_window_path}")
         return False
     
     with open(main_window_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+        main_window_content = f.read()
     
-    # Check 1: qdarktheme import with try-except
-    import_pattern = r'try:\s+import qdarktheme\s+HAS_QDARKTHEME = True\s+except ImportError:\s+HAS_QDARKTHEME = False'
-    if not re.search(import_pattern, content, re.MULTILINE):
-        print("❌ HAS_QDARKTHEME guard not found or improperly formatted")
-        return False
-    print("✅ HAS_QDARKTHEME guard properly defined with try-except")
+    # Check 1: HAS_QDARKTHEME is imported from helpers or defined locally
+    # Option 1: Imported from helpers
+    if 'from ui.helpers import' in main_window_content and 'HAS_QDARKTHEME' in main_window_content:
+        print("✅ HAS_QDARKTHEME imported from ui.helpers (centralized)")
+        
+        # Verify it exists in helpers.py
+        if not os.path.exists(helpers_path):
+            print(f"❌ File not found: {helpers_path}")
+            return False
+        
+        with open(helpers_path, 'r', encoding='utf-8') as f:
+            helpers_content = f.read()
+        
+        # Check that HAS_QDARKTHEME is defined in helpers
+        import_pattern = r'try:\s+import qdarktheme\s+HAS_QDARKTHEME = True\s+except ImportError:\s+HAS_QDARKTHEME = False'
+        if not re.search(import_pattern, helpers_content, re.MULTILINE):
+            print("❌ HAS_QDARKTHEME guard not found in ui/helpers.py")
+            return False
+        print("✅ HAS_QDARKTHEME guard properly defined in ui/helpers.py")
+        
+    # Option 2: Defined locally with try-except
+    else:
+        import_pattern = r'try:\s+import qdarktheme\s+HAS_QDARKTHEME = True\s+except ImportError:\s+HAS_QDARKTHEME = False'
+        if not re.search(import_pattern, main_window_content, re.MULTILINE):
+            print("❌ HAS_QDARKTHEME not imported from helpers and not defined locally")
+            return False
+        print("✅ HAS_QDARKTHEME guard properly defined locally")
     
     # Check 2: HAS_QDARKTHEME is used before qdarktheme
-    has_usage = content.find('HAS_QDARKTHEME')
-    qdarktheme_usage = content.find('qdarktheme.')
+    has_usage = main_window_content.find('HAS_QDARKTHEME')
+    qdarktheme_usage = main_window_content.find('qdarktheme.')
     
     if has_usage == -1:
         print("❌ HAS_QDARKTHEME not found in file")
         return False
     
     if qdarktheme_usage != -1 and has_usage > qdarktheme_usage:
-        print("❌ qdarktheme used before HAS_QDARKTHEME guard is defined")
+        print("❌ qdarktheme used before HAS_QDARKTHEME guard is available")
         return False
     
-    print("✅ HAS_QDARKTHEME guard is defined before any qdarktheme usage")
+    print("✅ HAS_QDARKTHEME guard is available before any qdarktheme usage")
     
     # Check 3: apply_theme function uses HAS_QDARKTHEME
-    apply_theme_match = re.search(r'def apply_theme\(.*?\):(.*?)(?=\n    def |\nclass |\Z)', content, re.DOTALL)
+    apply_theme_match = re.search(r'def apply_theme\(.*?\):(.*?)(?=\n    def |\nclass |\Z)', main_window_content, re.DOTALL)
     if not apply_theme_match:
         print("⚠️ apply_theme function not found")
         return True  # Not a critical error
