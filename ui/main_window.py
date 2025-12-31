@@ -130,18 +130,15 @@ try:
     _ = HAS_QDARKTHEME
 except NameError:
     HAS_QDARKTHEME = False
-    qdarktheme = None
 
 # Import qdarktheme module if available (for apply_theme function)
 # استيراد وحدة qdarktheme إذا كانت متاحة (لدالة apply_theme)
+qdarktheme = None
 if HAS_QDARKTHEME:
     try:
         import qdarktheme
     except ImportError:
-        HAS_QDARKTHEME = False
-        qdarktheme = None
-else:
-    qdarktheme = None
+        pass  # qdarktheme remains None
 
 
 
@@ -3032,14 +3029,12 @@ class MainWindow(QMainWindow):
             theme: اسم الثيم ('dark' أو 'light') - Theme name ('dark' or 'light')
             announce: إظهار إشعار بتطبيق الثيم - Show notification when applying theme
         """
-        # حماية إضافية - Additional protection
-        global HAS_QDARKTHEME, qdarktheme
-        
         self.theme = "dark" if theme == "dark" else "light"
         app = QApplication.instance()
         
         # محاولة تطبيق الثيم باستخدام qdarktheme إن كان متاحاً
         # Try to apply theme using qdarktheme if available
+        css = ""
         if HAS_QDARKTHEME and qdarktheme is not None:
             try:
                 css = qdarktheme.load_stylesheet(self.theme)
@@ -3048,12 +3043,6 @@ class MainWindow(QMainWindow):
                 # If theme application fails, use default theme
                 log_warning(f'فشل تحميل qdarktheme stylesheet: {e}')
                 css = ""
-                # التبديل إلى fallback
-                HAS_QDARKTHEME = False
-        else:
-            # qdarktheme غير متاح - استخدم fallback stylesheet
-            # qdarktheme not available - use fallback stylesheet
-            css = ""
         
         # إذا لم يتم تحميل CSS من qdarktheme، استخدم fallback يدوي
         # If CSS was not loaded from qdarktheme, use manual fallback
