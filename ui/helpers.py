@@ -8,7 +8,7 @@ Functions added in Phase 6:
 - Formatting functions (format_remaining_time, format_time_12h, etc.)
 - Token utility (mask_token)
 
-Functions added in Phase 7 (Refactoring):
+Functions added during refactoring:
 - simple_encrypt, simple_decrypt
 - check_ffmpeg_available
 - add_watermark

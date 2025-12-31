@@ -2,7 +2,7 @@
 UI Signals Module
 Module for UI signal definitions
 
-Moved from ui/main_window.py as part of Phase 7 refactoring.
+Moved from ui/main_window.py as part of refactoring to extract reusable components.
 """
 
 from PySide6.QtCore import QObject, Signal

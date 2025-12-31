@@ -903,7 +903,7 @@ def migrate_json_to_sqlite():
     This is a legacy migration function that runs once to convert
     old JSON-based storage to SQLite database.
     
-    Moved from ui/main_window.py as part of Phase 7 refactoring.
+    Moved from ui/main_window.py as part of refactoring to improve code organization.
     """
     from core import CHUNK_SIZE_DEFAULT
     
