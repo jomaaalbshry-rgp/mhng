@@ -15,7 +15,7 @@ from core.updater_utils import check_for_updates, create_update_script
 
 class UpdateCheckThread(QThread):
     """خيط فحص التحديثات"""
-    update_available = Signal(dict)
+    update_available = Signal(list)  # List of (name, current_version, latest_version)
     no_update = Signal()
     error = Signal(str)
     
@@ -25,8 +25,8 @@ class UpdateCheckThread(QThread):
     
     def run(self):
         try:
-            result = check_for_updates(self.current_version)
-            if result.get('available'):
+            result = check_for_updates()
+            if result:  # List of available updates
                 self.update_available.emit(result)
             else:
                 self.no_update.emit()
@@ -65,15 +65,17 @@ class UpdateHandlers:
         )
         self._update_thread.start()
     
-    def _on_update_available(self, result: dict, silent: bool):
+    def _on_update_available(self, result: list, silent: bool):
         """معالجة وجود تحديث متاح"""
-        version = result.get('version', 'Unknown')
-        changelog = result.get('changelog', '')
+        # result is a list of (name, current_version, latest_version)
+        packages = [f"{name} ({current} → {latest})" 
+                   for name, current, latest in result]
+        packages_str = '\n'.join(packages)
         
         reply = QMessageBox.question(
             self.parent,
             "تحديث متاح",
-            f"🆕 يتوفر تحديث جديد: {version}\n\n{changelog}\n\nهل تريد التحديث الآن؟",
+            f"🆕 يتوفر تحديث للمكتبات التالية:\n\n{packages_str}\n\nهل تريد التحديث الآن؟",
             QMessageBox.Yes | QMessageBox.No
         )
         
@@ -99,7 +101,11 @@ class UpdateHandlers:
                 f"❌ فشل فحص التحديثات: {error}"
             )
     
-    def _download_and_install(self, update_info: dict):
+    def _download_and_install(self, update_info: list):
         """تحميل وتثبيت التحديث"""
-        # ... كود تحميل وتثبيت التحديث
+        # update_info is a list of (name, current_version, latest_version)
+        # Extract package names for the update
+        packages_to_update = [name for name, _, _ in update_info]
+        # Future implementation: use create_update_script and run_update_and_restart
+        # from core.updater_utils
         pass

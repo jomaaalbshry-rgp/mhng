@@ -427,6 +427,14 @@ init_default_templates()  # إنشاء قوالب الجداول الافترا�
 ensure_default_templates()  # ضمان وجود القوالب الافتراضية (للترقية)
 
 
+# ==================== Notification Systems ====================
+# TelegramNotifier and NotificationSystem have been moved to core/notifications.py
+# They are imported above from core
+
+# مثيل عام لنظام إشعارات Telegram
+telegram_notifier = TelegramNotifier()
+
+
 def move_video_to_uploaded_folder(video_path: str, log_fn=None) -> bool:
     """
     نقل ملف الفيديو إلى مجلد فرعي باسم 'Uploaded' داخل نفس المجلد الأب.
