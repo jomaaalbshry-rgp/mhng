@@ -10,6 +10,7 @@ import os
 import sys
 import logging
 import threading
+import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -506,18 +507,17 @@ def log_error_to_file(error, extra_info=None):
         error: الخطأ الذي حدث / The error that occurred (Exception or str)
         extra_info: معلومات إضافية / Additional information (optional)
     """
-    import traceback
     try:
         logs_dir = _get_logs_directory()
         log_file = logs_dir / f'error_{datetime.now().strftime("%Y%m%d")}.log'
         
         # Get traceback information
-        exc_info = sys.exc_info()
-        has_exception_context = exc_info[0] is not None
+        current_exception_info = sys.exc_info()
+        has_exception_context = current_exception_info[0] is not None
         
         if has_exception_context:
             # We're in an exception handler, get the full traceback
-            tb_str = ''.join(traceback.format_exception(*exc_info))
+            tb_str = ''.join(traceback.format_exception(*current_exception_info))
         elif isinstance(error, BaseException):
             # Error is an Exception object but we're not in exception context
             # Format the exception type and message
@@ -538,9 +538,8 @@ def log_error_to_file(error, extra_info=None):
             f.write(f'Traceback:\n{tb_str}\n')
             f.write(f'{"=" * 80}\n')
         
-        # Also log using the unified logger
-        # Only pass exc_info=True if we're actually in an exception context
-        log_error(f"Error logged to file: {error}", extra_info, exc_info=has_exception_context)
+        # Also log at debug level to avoid redundant error logs
+        log_debug(f"Error details saved to {log_file.name}: {error}", extra_info)
     except Exception as log_err:
         # If logging fails, print to stderr to avoid silent failures
         print(f'Failed to log error to file: {log_err}', file=sys.stderr)
