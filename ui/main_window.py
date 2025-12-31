@@ -318,7 +318,7 @@ def get_all_long_lived_tokens() -> list:
     العائد:
         قائمة من التوكينات الطويلة - List of long-lived tokens
     """
-    return FacebookAPIService.get_all_long_lived_tokens(_get_database_file(), simple_decrypt)
+    return FacebookAPIService.get_all_long_lived_tokens(get_database_file(), simple_decrypt)
 
 
 # ==================== Thread Classes ====================
@@ -965,15 +965,11 @@ def add_watermark(video_path: str, logo_path: str, output_path: str,
 
 
 # تهيئة قاعدة البيانات عند تحميل الوحدة
-# Step 1: Run new DatabaseManager migrations and insert default templates
-# This handles the 'times' column migration and inserts default templates if table is empty
-initialize_database()
-
-# Step 2: Run legacy database initialization for other tables
-# Note: init_database() removed - it was undefined and caused NameError
+# Database is initialized in admin.py before this module is imported
+# Step 1: Run legacy database initialization for other tables
 migrate_json_to_sqlite()
 
-# Step 3: Run legacy template initialization (for backwards compatibility)
+# Step 2: Run legacy template initialization (for backwards compatibility)
 init_default_templates()  # إنشاء قوالب الجداول الافتراضية
 ensure_default_templates()  # ضمان وجود القوالب الافتراضية (للترقية)
 
@@ -3667,7 +3663,7 @@ class MainWindow(QMainWindow):
             self._log_append('💡 قم بتثبيت FFmpeg من: https://ffmpeg.org/download.html')
 
     def _load_settings_basic(self):
-        settings_file = _get_settings_file()
+        settings_file = get_settings_file()
         if settings_file.exists():
             try:
                 with open(settings_file, 'r', encoding='utf-8') as f:
@@ -5834,7 +5830,7 @@ class MainWindow(QMainWindow):
             log_debug('[FixJobStates] لا توجد وظائف مجدولة')
 
     def _save_settings(self):
-        settings_file = _get_settings_file()
+        settings_file = get_settings_file()
         # التوكن يتم إدارته الآن من خلال نظام إدارة التوكينات
 
         settings = {
