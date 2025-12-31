@@ -5547,7 +5547,8 @@ class MainWindow(QMainWindow):
         # Delegate to SchedulerUI component
         self.scheduler_ui.stop_selected_job()
 
-
+    def start_scheduler(self):
+        """تشغيل المجدول - Start the scheduler threads."""
         # التحقق من وجود وظائف (فيديو أو ستوري أو ريلز)
         if not self.jobs_map and not self.story_jobs_map and not self.reels_jobs_map:
             QMessageBox.warning(self, 'لا وظائف', 'أضف وظيفة واحدة على الأقل.')
