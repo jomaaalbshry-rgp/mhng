@@ -5547,7 +5547,20 @@ class MainWindow(QMainWindow):
         # Delegate to SchedulerUI component
         self.scheduler_ui.stop_selected_job()
 
-
+    def start_scheduler(self):
+        """
+        تشغيل المجدول - Start the scheduler threads.
+        
+        This method starts the scheduler threads for video, story, and reels jobs.
+        It prefers delegating to scheduler_ui.start_scheduler() if available,
+        otherwise uses the direct implementation for backward compatibility.
+        """
+        # Check if scheduler_ui has a start_scheduler method (future compatibility)
+        if hasattr(self.scheduler_ui, 'start_scheduler') and callable(getattr(self.scheduler_ui, 'start_scheduler', None)):
+            self.scheduler_ui.start_scheduler()
+            return
+        
+        # Fallback: Direct implementation for starting scheduler threads
         # التحقق من وجود وظائف (فيديو أو ستوري أو ريلز)
         if not self.jobs_map and not self.story_jobs_map and not self.reels_jobs_map:
             QMessageBox.warning(self, 'لا وظائف', 'أضف وظيفة واحدة على الأقل.')
@@ -5611,6 +5624,19 @@ class MainWindow(QMainWindow):
         self.refresh_jobs_list()
 
     def stop_scheduler(self):
+        """
+        إيقاف المجدول - Stop the scheduler threads.
+        
+        This method stops all running scheduler threads.
+        It prefers delegating to scheduler_ui.stop_scheduler() if available,
+        otherwise uses the direct implementation for backward compatibility.
+        """
+        # Check if scheduler_ui has a stop_scheduler method (future compatibility)
+        if hasattr(self.scheduler_ui, 'stop_scheduler') and callable(getattr(self.scheduler_ui, 'stop_scheduler', None)):
+            self.scheduler_ui.stop_scheduler()
+            return
+        
+        # Fallback: Direct implementation for stopping scheduler threads
         stopped_any = False
         stopped_types = []
 
