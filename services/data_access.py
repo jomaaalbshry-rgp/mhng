@@ -891,3 +891,107 @@ def get_schedule_times_for_template(template_id: int = None) -> list:
     if template:
         return template.get('times', [])
     return ['08:00', '12:00', '18:00', '22:00']
+
+
+# ==================== Legacy Data Migration ====================
+
+def migrate_json_to_sqlite():
+    """
+    ترحيل البيانات من ملفات JSON إلى SQLite عند أول تشغيل.
+    Migrate data from JSON files to SQLite on first run.
+    
+    This is a legacy migration function that runs once to convert
+    old JSON-based storage to SQLite database.
+    
+    Moved from ui/main_window.py as part of Phase 7 refactoring.
+    """
+    from core import CHUNK_SIZE_DEFAULT
+    
+    db_path = get_database_file()
+    jobs_file = get_jobs_file()
+    settings_file = get_settings_file()
+    
+    # التحقق من وجود بيانات للترحيل
+    if not jobs_file.exists() and not settings_file.exists():
+        return
+    
+    log_info('[DataAccess] Starting JSON to SQLite migration')
+    
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        
+        # ترحيل الوظائف
+        if jobs_file.exists():
+            try:
+                with open(jobs_file, 'r', encoding='utf-8') as f:
+                    jobs_data = json.load(f)
+                
+                # Support both list (old format) and dict (new format)
+                if isinstance(jobs_data, list):
+                    jobs_list = jobs_data
+                elif isinstance(jobs_data, dict):
+                    jobs_list = jobs_data.get('video_jobs', [])
+                else:
+                    jobs_list = []
+                
+                migrated_count = 0
+                for job in jobs_list:
+                    try:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO jobs
+                            (page_id, page_name, folder, interval_seconds, page_access_token,
+                             next_index, title_template, description_template, chunk_size,
+                             use_filename_as_title, enabled, is_scheduled, next_run_timestamp)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            job.get('page_id'),
+                            job.get('page_name', ''),
+                            job.get('folder', ''),
+                            job.get('interval_seconds', 10800),
+                            job.get('page_access_token'),
+                            job.get('next_index', 0),
+                            job.get('title_template', '{filename}'),
+                            job.get('description_template', ''),
+                            job.get('chunk_size', CHUNK_SIZE_DEFAULT),
+                            1 if job.get('use_filename_as_title', False) else 0,
+                            1 if job.get('enabled', True) else 0,
+                            1 if job.get('is_scheduled', False) else 0,
+                            job.get('next_run_timestamp')
+                        ))
+                        migrated_count += 1
+                    except Exception as job_err:
+                        log_warning(f'[DataAccess] Failed to migrate job: {job_err}')
+                
+                if migrated_count > 0:
+                    log_info(f'[DataAccess] Migrated {migrated_count} jobs from JSON to SQLite')
+            except Exception as e:
+                log_error(f'[DataAccess] Failed to migrate jobs: {e}')
+        
+        # ترحيل الإعدادات
+        if settings_file.exists():
+            try:
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                
+                migrated_count = 0
+                for key, value in settings.items():
+                    try:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO settings (key, value)
+                            VALUES (?, ?)
+                        ''', (key, json.dumps(value) if not isinstance(value, str) else value))
+                        migrated_count += 1
+                    except Exception as setting_err:
+                        log_warning(f'[DataAccess] Failed to migrate setting {key}: {setting_err}')
+                
+                if migrated_count > 0:
+                    log_info(f'[DataAccess] Migrated {migrated_count} settings from JSON to SQLite')
+            except Exception as e:
+                log_error(f'[DataAccess] Failed to migrate settings: {e}')
+        
+        conn.commit()
+        conn.close()
+        log_info('[DataAccess] JSON to SQLite migration completed')
+    except Exception as e:
+        log_error(f'[DataAccess] Migration failed: {e}')

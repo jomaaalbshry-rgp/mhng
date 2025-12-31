@@ -40,7 +40,8 @@ from services import (
     log_upload, get_upload_stats, reset_upload_stats, generate_text_chart,
     init_default_templates, ensure_default_templates,
     get_all_templates, get_template_by_id, save_template, delete_template,
-    get_default_template, set_default_template, get_schedule_times_for_template
+    get_default_template, set_default_template, get_schedule_times_for_template,
+    migrate_json_to_sqlite
 )
 from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_decrypt
 
@@ -116,75 +117,6 @@ from ui.scheduler_ui import SchedulerUI
 
 
 # ==================== Constants and Module Initialization ====================
-
-
-# ==================== SQLite Database ====================
-# Database path and init functions moved to services/data_access.py
-# Note: init_database() is imported from services above
-
-def migrate_json_to_sqlite():
-    """
-    ترحيل البيانات من ملفات JSON إلى SQLite عند أول تشغيل.
-    Migrate data from JSON files to SQLite on first run.
-    """
-    db_path = get_database_file()
-    jobs_file = get_jobs_file()
-    settings_file = get_settings_file()
-
-    # التحقق من وجود بيانات للترحيل
-    if not jobs_file.exists() and not settings_file.exists():
-        return
-
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    # ترحيل الوظائف
-    if jobs_file.exists():
-        try:
-            with open(jobs_file, 'r', encoding='utf-8') as f:
-                jobs_data = json.load(f)
-
-            for job in jobs_data:
-                cursor.execute('''
-                    INSERT OR REPLACE INTO jobs
-                    (page_id, page_name, folder, interval_seconds, page_access_token,
-                     next_index, title_template, description_template, chunk_size,
-                     use_filename_as_title, enabled, is_scheduled, next_run_timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    job.get('page_id'),
-                    job.get('page_name', ''),
-                    job.get('folder', ''),
-                    job.get('interval_seconds', 10800),
-                    job.get('page_access_token'),
-                    job.get('next_index', 0),
-                    job.get('title_template', '{filename}'),
-                    job.get('description_template', ''),
-                    job.get('chunk_size', CHUNK_SIZE_DEFAULT),
-                    1 if job.get('use_filename_as_title', False) else 0,
-                    1 if job.get('enabled', True) else 0,
-                    1 if job.get('is_scheduled', False) else 0,
-                    job.get('next_run_timestamp')
-                ))
-        except Exception:
-            pass
-
-    # ترحيل الإعدادات
-    if settings_file.exists():
-        try:
-            with open(settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-
-            for key, value in settings.items():
-                cursor.execute('''
-                    INSERT OR REPLACE INTO settings (key, value)
-                    VALUES (?, ?)
-                ''', (key, json.dumps(value) if not isinstance(value, str) else value))
-        except Exception:
-            pass
-
-    conn.commit()
-    conn.close()
 
 
 # ==================== App Tokens Management ====================
