@@ -1318,6 +1318,20 @@ COUNTDOWN_COLOR_GRAY = '#808080'    # رمادي: معطّل
 REMAINING_TIME_RUNNING = "⏰ جاري التشغيل..."  # نص يظهر عند تشغيل الوظيفة
 REMAINING_TIME_NOT_SCHEDULED = "---"  # نص يظهر للوظائف غير المجدولة
 
+
+# ==================== Data Access Helpers ====================
+
+def _get_jobs_file() -> Path:
+    """
+    Helper wrapper for get_jobs_file() from services.
+    Provides backward compatibility for code using the underscore-prefixed name.
+    
+    Returns:
+        Path: Path to the jobs file in AppData
+    """
+    return get_jobs_file()
+
+
 class PageJob:
     """
     تمثيل وظيفة رفع فيديوهات لصفحة فيسبوك.
