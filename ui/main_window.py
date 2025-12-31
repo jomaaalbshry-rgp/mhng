@@ -59,7 +59,8 @@ from services import get_pages, PageFetchWorker, TokenExchangeWorker, AllPagesFe
 from core import (
     get_resource_path, get_subprocess_args, run_subprocess, create_popen, SmartUploadScheduler,
     APIUsageTracker, APIWarningSystem, get_api_tracker, get_api_warning_system,
-    API_CALLS_PER_STORY, get_date_placeholder, apply_title_placeholders
+    API_CALLS_PER_STORY, get_date_placeholder, apply_title_placeholders,
+    make_job_key, get_job_key
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QTime, QThread
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QBrush, QFont, QFontMetrics, QTextCursor
@@ -1558,43 +1559,6 @@ class PageJob:
         obj.watermark_x = d.get('watermark_x')
         obj.watermark_y = d.get('watermark_y')
         return obj
-
-
-def make_job_key(page_id: str, app_name: str = '') -> str:
-    """
-    إنشاء مفتاح فريد للوظيفة يجمع بين page_id و app_name.
-
-    هذا يسمح بإنشاء وظائف متعددة لنفس الصفحة من تطبيقات مختلفة.
-
-    المعاملات:
-        page_id: معرف الصفحة
-        app_name: اسم التطبيق
-
-    العائد:
-        مفتاح فريد بصيغة "page_id:::app_name" أو "page_id" إذا لم يكن هناك app_name
-
-    ملاحظة:
-        يتم استخدام ::: كفاصل بدلاً من | لتجنب المشاكل مع أسماء التطبيقات
-        التي قد تحتوي على حرف |
-    """
-    if app_name:
-        return f"{page_id}:::{app_name}"
-    return page_id
-
-
-def get_job_key(job) -> str:
-    """
-    الحصول على مفتاح الوظيفة من كائن الوظيفة.
-
-    المعاملات:
-        job: كائن الوظيفة (PageJob, StoryJob, ReelsJob)
-
-    العائد:
-        مفتاح الوظيفة الفريد
-    """
-    # استخدام getattr لدعم التوافق مع الإصدارات القديمة والكائنات المختلفة
-    app_name = getattr(job, 'app_name', '')
-    return make_job_key(job.page_id, app_name)
 
 
 def apply_template(template_str, page_job: PageJob, filename: str, file_index: int, total_files: int):
