@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
 
 # استيراد من services
 from services import (
-    get_all_templates, get_template_by_id, save_template, 
-    delete_template, get_default_template, set_default_template
+    get_all_templates, save_template, 
+    delete_template, set_default_template
 )
 from services.data_access import ALL_WEEKDAYS_STR
 

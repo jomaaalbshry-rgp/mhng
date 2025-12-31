@@ -14,8 +14,7 @@ from PySide6.QtWidgets import (
 
 # استيراد من core
 from core import (
-    TokenExchangeThread, DEFAULT_TOKEN_EXPIRY_SECONDS,
-    THREAD_QUIT_TIMEOUT_MS, THREAD_TERMINATE_TIMEOUT_MS
+    TokenExchangeThread, DEFAULT_TOKEN_EXPIRY_SECONDS
 )
 
 
