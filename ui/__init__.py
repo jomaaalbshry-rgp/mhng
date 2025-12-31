@@ -3,7 +3,9 @@
 User Interface module
 """
 
-from .main_window import MainWindow
+# تأخير استيراد MainWindow لتجنب circular import مع المجدولات
+# Delay MainWindow import to avoid circular import with schedulers
+# from .main_window import MainWindow
 from .scheduler_ui import SchedulerUI
 from .signals import UiSignals
 
@@ -29,8 +31,15 @@ from .helpers import (
     HAS_QTAWESOME,
 )
 
+def __getattr__(name):
+    """Lazy loading for MainWindow to avoid circular import"""
+    if name == 'MainWindow':
+        from .main_window import MainWindow
+        return MainWindow
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 __all__ = [
-    'MainWindow',
+    'MainWindow',  # سيتم تحميله عند الطلب - Will be loaded on demand
     'SchedulerUI',
     'UiSignals',
     'NoScrollComboBox',

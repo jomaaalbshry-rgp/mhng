@@ -14,7 +14,6 @@ This module provides core functionality including:
 from .single_instance import SingleInstanceManager
 from .threads import TokenExchangeThread, FetchPagesThread
 from .notifications import TelegramNotifier, NotificationSystem
-from .schedulers import SchedulerThread, StorySchedulerThread, ReelsSchedulerThread
 from .constants import (
     SINGLE_INSTANCE_BASE_NAME,
     APP_TITLE,
@@ -65,6 +64,12 @@ from .utils import (
     get_subprocess_args, run_subprocess, create_popen
 )
 from .job_keys import make_job_key, get_job_key
+
+# تأخير استيراد المجدولات لتجنب circular import
+# Delay scheduler imports to avoid circular import
+# المجدولات تعتمد على ui.signals والتي يمكن أن تستورد من ui.main_window
+# لذا نستوردها في النهاية بعد تعريف كل الوحدات الأساسية
+from .schedulers import SchedulerThread, StorySchedulerThread, ReelsSchedulerThread
 
 __all__ = [
     'SingleInstanceManager',

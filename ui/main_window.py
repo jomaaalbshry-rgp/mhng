@@ -79,7 +79,6 @@ from core import (
     SingleInstanceManager, SINGLE_INSTANCE_BASE_NAME,
     TokenExchangeThread, FetchPagesThread,
     TelegramNotifier, NotificationSystem,
-    SchedulerThread, StorySchedulerThread, ReelsSchedulerThread,
     APP_TITLE, APP_DATA_FOLDER,
     RESUMABLE_THRESHOLD_BYTES, CHUNK_SIZE_DEFAULT,
     UPLOAD_TIMEOUT_START, UPLOAD_TIMEOUT_TRANSFER, UPLOAD_TIMEOUT_FINISH,
@@ -91,6 +90,9 @@ from core import (
     DEFAULT_TOKEN_EXPIRY_SECONDS, FACEBOOK_API_VERSION, FACEBOOK_API_TIMEOUT,
     THREAD_QUIT_TIMEOUT_MS, THREAD_TERMINATE_TIMEOUT_MS, SECRET_KEY
 )
+# استيراد المجدولات مباشرة لتجنب circular import
+# Import schedulers directly to avoid circular import
+from core.schedulers import SchedulerThread, StorySchedulerThread, ReelsSchedulerThread
 from ui.widgets import NoScrollComboBox, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollSlider
 from ui.dialogs import (
     HashtagManagerDialog as HashtagManagerDialogBase,
