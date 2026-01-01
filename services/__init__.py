@@ -13,6 +13,12 @@ from .token_manager import (
 )
 from .updater import *
 
+# استيراد خدمة إدارة التوكينات - Import token service
+from .token_service import (
+    get_all_app_tokens, save_app_token, delete_app_token,
+    exchange_token_for_long_lived, get_all_long_lived_tokens
+)
+
 # استيراد وحدة الوصول إلى البيانات - Import data access module
 from .data_access import (
     get_settings_file, get_jobs_file, get_database_file, migrate_old_files,
@@ -32,13 +38,14 @@ _upload_helpers_cache = {}
 def __getattr__(name):
     """استيراد مؤجل للدوال من upload_helpers - Lazy import for upload_helpers functions"""
     if name in ('resumable_upload', 'apply_watermark_to_video', 
-                'cleanup_temp_watermark_file', 'upload_video_once'):
+                'cleanup_temp_watermark_file', 'upload_video_once', 'move_video_to_uploaded_folder'):
         if name not in _upload_helpers_cache:
             from . import upload_helpers
             _upload_helpers_cache['resumable_upload'] = upload_helpers.resumable_upload
             _upload_helpers_cache['apply_watermark_to_video'] = upload_helpers.apply_watermark_to_video
             _upload_helpers_cache['cleanup_temp_watermark_file'] = upload_helpers.cleanup_temp_watermark_file
             _upload_helpers_cache['upload_video_once'] = upload_helpers.upload_video_once
+            _upload_helpers_cache['move_video_to_uploaded_folder'] = upload_helpers.move_video_to_uploaded_folder
         return _upload_helpers_cache[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
@@ -84,4 +91,11 @@ __all__ = [
     'apply_watermark_to_video',
     'cleanup_temp_watermark_file',
     'upload_video_once',
+    'move_video_to_uploaded_folder',
+    # Token service functions
+    'get_all_app_tokens',
+    'save_app_token',
+    'delete_app_token',
+    'exchange_token_for_long_lived',
+    'get_all_long_lived_tokens',
 ]

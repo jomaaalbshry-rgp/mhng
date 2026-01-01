@@ -250,3 +250,126 @@ def upload_video_once(page_job: 'PageJob', video_path, token, ui_signals: UiSign
                 log_fn(f'⚠️ خطأ في تنظيف الملف المؤقت: {cleanup_error}')
             except Exception:
                 pass
+
+
+def move_video_to_uploaded_folder(video_path: str, log_fn=None, uploaded_folder_name: str = 'Uploaded') -> bool:
+    """
+    نقل ملف الفيديو إلى مجلد فرعي باسم 'Uploaded' داخل نفس المجلد الأب.
+    Move video file to 'Uploaded' subfolder within the same parent folder.
+
+    - إذا لم يكن مجلد 'Uploaded' موجوداً يتم إنشاؤه تلقائياً.
+    - في حالة وجود ملف بنفس الاسم في مجلد Uploaded، يتم إعادة تسميته بإضافة رقم مميز.
+    - يتم إرجاع True فقط إذا تم نقل الملف فعلياً والتأكد من وجوده في الوجهة.
+    - جميع الأخطاء تُسجل في السجل بوضوح.
+
+    المعاملات:
+        video_path: المسار الكامل لملف الفيديو المراد نقله - Full path to video file to move
+        log_fn: دالة اختيارية للتسجيل (logging) - Optional logging function
+        uploaded_folder_name: اسم مجلد الوجهة - Destination folder name (default: 'Uploaded')
+
+    الاستخدام:
+        يتم استدعاء هذه الدالة بعد نجاح رفع الفيديو لنقله تلقائياً.
+        Called after successful video upload to move it automatically.
+    """
+    import shutil
+    
+    def _log(msg):
+        if log_fn:
+            log_fn(msg)
+
+    # التحقق من صحة المسار المُدخل
+    if not video_path:
+        _log('خطأ: مسار الفيديو فارغ أو غير صالح')
+        return False
+
+    try:
+        video_file = Path(video_path)
+    except Exception as e:
+        _log(f'خطأ في تحليل مسار الملف: {video_path} - {e}')
+        return False
+
+    # التحقق من وجود الملف المصدر فعلياً
+    if not video_file.exists():
+        _log(f'فشل النقل: الملف المصدر غير موجود: {video_path}')
+        return False
+
+    if not video_file.is_file():
+        _log(f'فشل النقل: المسار ليس ملفاً صالحاً: {video_path}')
+        return False
+
+    parent_folder = video_file.parent
+    uploaded_folder = parent_folder / uploaded_folder_name
+
+    # إنشاء مجلد Uploaded إذا لم يكن موجوداً
+    if not uploaded_folder.exists():
+        try:
+            uploaded_folder.mkdir(parents=True, exist_ok=True)
+            _log(f'تم إنشاء مجلد Uploaded: {uploaded_folder}')
+        except PermissionError as e:
+            _log(f'فشل إنشاء مجلد Uploaded - خطأ صلاحيات: {uploaded_folder} - {e}')
+            return False
+        except OSError as e:
+            _log(f'فشل إنشاء مجلد Uploaded - خطأ نظام الملفات: {uploaded_folder} - {e}')
+            return False
+        except Exception as e:
+            _log(f'فشل إنشاء مجلد Uploaded - خطأ غير متوقع: {uploaded_folder} - {e}')
+            return False
+
+    # التأكد من وجود المجلد بعد الإنشاء
+    if not uploaded_folder.exists():
+        _log(f'فشل النقل: مجلد Uploaded لم يُنشأ رغم عدم وجود خطأ: {uploaded_folder}')
+        return False
+
+    if not uploaded_folder.is_dir():
+        _log(f'فشل النقل: المسار {uploaded_folder} موجود لكنه ليس مجلداً')
+        return False
+
+    # معالجة حالة تكرار اسم الملف
+    target_path = uploaded_folder / video_file.name
+    if target_path.exists():
+        # إضافة رقم مميز لتجنب التكرار
+        base_name = video_file.stem
+        extension = video_file.suffix
+        counter = 1
+        max_attempts = 1000  # حد أقصى لمنع حلقة لا نهائية
+        while target_path.exists() and counter < max_attempts:
+            new_name = f"{base_name}_{counter}{extension}"
+            target_path = uploaded_folder / new_name
+            counter += 1
+
+        if target_path.exists():
+            _log(f'فشل النقل: لا يمكن إيجاد اسم فريد للملف بعد {max_attempts} محاولة')
+            return False
+
+        _log(f'تم إعادة تسمية الملف لتجنب التكرار: {target_path.name}')
+
+    # نقل الملف
+    try:
+        shutil.move(str(video_file), str(target_path))
+    except PermissionError as e:
+        _log(f'فشل نقل الفيديو - خطأ صلاحيات: {video_file} -> {target_path} - {e}')
+        return False
+    except shutil.Error as e:
+        _log(f'فشل نقل الفيديو - خطأ shutil: {video_file} -> {target_path} - {e}')
+        return False
+    except OSError as e:
+        _log(f'فشل نقل الفيديو - خطأ نظام الملفات: {video_file} -> {target_path} - {e}')
+        return False
+    except Exception as e:
+        _log(f'فشل نقل الفيديو - خطأ غير متوقع: {video_file} -> {target_path} - {e}')
+        return False
+
+    # التحقق من أن الملف نُقل فعلياً إلى الوجهة
+    if not target_path.exists():
+        _log(f'فشل النقل: الملف لم يظهر في الوجهة بعد عملية النقل: {target_path}')
+        return False
+
+    # التحقق من أن الملف الأصلي لم يعد موجوداً (تم نقله وليس نسخه)
+    # ملاحظة: في حالة النقل بين أنظمة ملفات مختلفة، قد يقوم shutil.move بنسخ ثم حذف
+    # إذا بقي الملف الأصلي، فهذا يعني أن الحذف فشل - نسجل تحذير لكن لا نعتبره فشلاً
+    # لأن الهدف الأساسي (وجود الملف في Uploaded) تحقق
+    if video_file.exists():
+        _log(f'تحذير: الملف الأصلي لا يزال موجوداً بعد النقل (قد يكون نقل عبر أنظمة ملفات): {video_file}')
+
+    _log(f'تم نقل الفيديو بنجاح إلى: {target_path}')
+    return True

@@ -41,7 +41,10 @@ from services import (
     init_default_templates, ensure_default_templates,
     get_all_templates, get_template_by_id, save_template, delete_template,
     get_default_template, set_default_template, get_schedule_times_for_template,
-    migrate_json_to_sqlite
+    migrate_json_to_sqlite,
+    # استيراد دوال إدارة التوكينات - Import token management functions
+    get_all_app_tokens, save_app_token, delete_app_token,
+    exchange_token_for_long_lived, get_all_long_lived_tokens
 )
 from secure_utils import encrypt_text as secure_encrypt, decrypt_text as secure_decrypt
 
@@ -60,7 +63,8 @@ from controllers.reels_controller import ReelsJob, get_reels_files, count_reels_
 from services import get_pages, PageFetchWorker, TokenExchangeWorker, AllPagesFetchWorker
 from services import (
     resumable_upload, apply_watermark_to_video,
-    cleanup_temp_watermark_file, upload_video_once
+    cleanup_temp_watermark_file, upload_video_once,
+    move_video_to_uploaded_folder
 )
 from core import (
     get_resource_path, get_subprocess_args, run_subprocess, create_popen, SmartUploadScheduler,
@@ -180,85 +184,57 @@ _facebook_api_service = FacebookAPIService(
 )
 _upload_service = UploadService(api_version='v17.0')
 
-def get_all_app_tokens() -> list:
+# Note: Token management functions (get_all_app_tokens, save_app_token, delete_app_token,
+# exchange_token_for_long_lived, get_all_long_lived_tokens) are now imported from services.token_service
+# via services/__init__.py. These functions need to be called with appropriate parameters.
+# The functions below are compatibility wrappers that maintain the old interface.
+
+
+def get_all_app_tokens_wrapper() -> list:
     """
-    الحصول على جميع التطبيقات والتوكينات المحفوظة.
-    Get all saved applications and tokens.
-
-    العائد:
-        قائمة من القواميس تحتوي على بيانات التطبيقات
-        List of dictionaries containing app data
+    Compatibility wrapper for get_all_app_tokens.
+    Calls token_service function with required parameters.
     """
-    return FacebookAPIService.get_all_app_tokens(get_database_file(), simple_decrypt)
+    return get_all_app_tokens(get_database_file(), simple_decrypt)
 
 
-def save_app_token(app_name: str, app_id: str, app_secret: str = '',
-                   short_lived_token: str = '', long_lived_token: str = '',
-                   token_expires_at: str = None, token_id: int = None) -> Tuple[bool, Optional[int]]:
+def save_app_token_wrapper(app_name: str, app_id: str, app_secret: str = '',
+                           short_lived_token: str = '', long_lived_token: str = '',
+                           token_expires_at: str = None, token_id: int = None) -> Tuple[bool, Optional[int]]:
     """
-    حفظ أو تحديث تطبيق وتوكيناته.
-    Save or update application and its tokens.
-
-    المعاملات:
-        app_name: اسم التطبيق - App name
-        app_id: معرف التطبيق - App ID
-        app_secret: كلمة المرور - App secret
-        short_lived_token: التوكن القصير - Short-lived token
-        long_lived_token: التوكن الطويل - Long-lived token
-        token_expires_at: تاريخ انتهاء التوكن - Token expiration date
-        token_id: معرف التطبيق للتحديث (None لإضافة جديد) - App ID for update (None for new)
-
-    العائد:
-        tuple: (نجاح: bool, معرف السجل: int أو None)
-        tuple: (success: bool, record ID: int or None)
+    Compatibility wrapper for save_app_token.
+    Calls token_service function with required parameters.
     """
-    return FacebookAPIService.save_app_token(
+    return save_app_token(
         get_database_file(), simple_encrypt, app_name, app_id, app_secret,
         short_lived_token, long_lived_token, token_expires_at, token_id
     )
 
 
-def delete_app_token(token_id: int) -> bool:
+def delete_app_token_wrapper(token_id: int) -> bool:
     """
-    حذف تطبيق من قاعدة البيانات.
-    Delete application from database.
-
-    المعاملات:
-        token_id: معرف التطبيق - App ID
-
-    العائد:
-        True إذا نجح الحذف - True if deletion successful
+    Compatibility wrapper for delete_app_token.
+    Calls token_service function with required parameters.
     """
-    return FacebookAPIService.delete_app_token(get_database_file(), token_id)
+    return delete_app_token(get_database_file(), token_id)
 
 
-def exchange_token_for_long_lived(app_id: str, app_secret: str,
-                                   short_lived_token: str) -> tuple:
+def exchange_token_for_long_lived_wrapper(app_id: str, app_secret: str,
+                                          short_lived_token: str) -> tuple:
     """
-    تحويل التوكن القصير إلى توكن طويل (60 يوم) عبر Facebook Graph API.
-    Exchange short-lived token for long-lived token (60 days) via Facebook Graph API.
-
-    المعاملات:
-        app_id: معرف التطبيق - App ID
-        app_secret: كلمة المرور - App secret
-        short_lived_token: التوكن القصير - Short-lived token
-
-    العائد:
-        tuple: (نجاح: bool, التوكن الطويل أو رسالة الخطأ: str, تاريخ الانتهاء: str أو None)
-        tuple: (success: bool, long-lived token or error message: str, expiry date: str or None)
+    Compatibility wrapper for exchange_token_for_long_lived.
+    Calls token_service function with required parameters.
     """
-    return _facebook_api_service.exchange_token_for_long_lived(app_id, app_secret, short_lived_token)
+    return exchange_token_for_long_lived(_facebook_api_service, app_id, app_secret, short_lived_token)
 
 
-def get_all_long_lived_tokens() -> list:
+def get_all_long_lived_tokens_wrapper() -> list:
     """
-    الحصول على جميع التوكينات الطويلة الصالحة.
-    Get all valid long-lived tokens.
-
-    العائد:
-        قائمة من التوكينات الطويلة - List of long-lived tokens
+    Compatibility wrapper for get_all_long_lived_tokens.
+    Calls token_service function with required parameters.
     """
-    return FacebookAPIService.get_all_long_lived_tokens(get_database_file(), simple_decrypt)
+    return get_all_long_lived_tokens(get_database_file(), simple_decrypt)
+
 
 
 # ==================== Thread Classes ====================
@@ -302,69 +278,6 @@ def send_telegram_error(error_type: str, message: str, job_name: str = None):
 
 
 # ==================== Internet Connectivity Check ====================
-
-def check_internet_connection(timeout: int = 5, hosts: list = None) -> bool:
-    """
-    التحقق من الاتصال بالإنترنت عن طريق Ping لخوادم موثوقة.
-
-    المعاملات:
-        timeout: مهلة الاتصال بالثواني
-        hosts: قائمة بالمضيفين للتحقق منهم
-
-    العائد:
-        True إذا كان هناك اتصال بالإنترنت، False خلاف ذلك
-    """
-    if hosts is None:
-        hosts = [
-            ('8.8.8.8', 53),        # Google DNS
-            ('8.8.4.4', 53),        # Google DNS Secondary
-            ('1.1.1.1', 53),        # Cloudflare DNS
-            ('208.67.222.222', 53), # OpenDNS
-        ]
-
-    for host, port in hosts:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            sock.connect((host, port))
-            sock.close()
-            return True
-        except (socket.timeout, socket.error, OSError):
-            continue
-
-    return False
-
-
-def wait_for_internet(log_fn=None, check_interval: int = 60, max_attempts: int = 0) -> bool:
-    """
-    الانتظار حتى يعود الاتصال بالإنترنت (وضع الغفوة).
-
-    المعاملات:
-        log_fn: دالة للتسجيل
-        check_interval: الفاصل الزمني بين المحاولات بالثواني
-        max_attempts: الحد الأقصى للمحاولات (0 = بلا حد)
-
-    العائد:
-        True عند عودة الاتصال، False إذا تم تجاوز الحد الأقصى للمحاولات
-    """
-    def _log(msg):
-        if log_fn:
-            log_fn(msg)
-
-    attempts = 0
-    while True:
-        if check_internet_connection():
-            if attempts > 0:
-                _log('✅ عاد الاتصال بالإنترنت - استئناف العمل')
-            return True
-
-        attempts += 1
-        if max_attempts > 0 and attempts >= max_attempts:
-            _log(f'⚠️ تم تجاوز الحد الأقصى للمحاولات ({max_attempts})')
-            return False
-
-        _log(f'📶 لا يوجد اتصال بالإنترنت - المحاولة {attempts} - الانتظار {check_interval} ثانية...')
-        time.sleep(check_interval)
 
 
 # ==================== Module Initialization ====================
@@ -1792,7 +1705,7 @@ class MainWindow(QMainWindow):
         يستخدم أول توكن طويل متاح من نظام إدارة التوكينات.
         """
         # الحصول على التوكينات الطويلة من نظام إدارة التوكينات
-        tokens = get_all_long_lived_tokens()
+        tokens = get_all_long_lived_tokens_wrapper()
         if tokens:
             return tokens[0]  # استخدام أول توكن متاح
         return None
@@ -1801,9 +1714,9 @@ class MainWindow(QMainWindow):
         """فتح نافذة إدارة التوكينات."""
         dialog = TokenManagementDialog(
             self,
-            get_all_app_tokens_func=get_all_app_tokens,
-            save_app_token_func=save_app_token,
-            delete_app_token_func=delete_app_token
+            get_all_app_tokens_func=get_all_app_tokens_wrapper,
+            save_app_token_func=save_app_token_wrapper,
+            delete_app_token_func=delete_app_token_wrapper
         )
         dialog.exec()
         # إعادة تعيين الـ Cache بعد تحديث التوكينات
@@ -1817,7 +1730,7 @@ class MainWindow(QMainWindow):
         يقوم بتفويض العملية إلى PagesPanel.
         """
         # الحصول على جميع التطبيقات (وليس فقط التوكينات)
-        apps = get_all_app_tokens()
+        apps = get_all_app_tokens_wrapper()
 
         if not apps:
             QMessageBox.warning(
