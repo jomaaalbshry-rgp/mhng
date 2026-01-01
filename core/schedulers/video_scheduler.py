@@ -82,19 +82,24 @@ class SchedulerThread(threading.Thread):
 
                     # التحقق من وصول الوقت باستخدام job.next_run_timestamp
                     if now >= job.next_run_timestamp:
+                        self.log(f'🔵 [DEBUG] بدء جدولة رفع فيديو: {job.page_name}')
                         executor.submit(self._upload_wrapper, job)
                         # ضبط الوقت التالي بعد الرفع
                         job.reset_next_run_timestamp()
+                        self.log(f'🔵 [DEBUG] تم جدولة الرفع وضبط الوقت التالي: {job.page_name}')
                 time.sleep(1)
         self.log('توقف المجدول.')
 
     def _upload_wrapper(self, job):
         """غلاف آمن لعملية الرفع مع معالجة شاملة للأخطاء."""
+        self.log(f'🔵 [DEBUG] دخول _upload_wrapper للوظيفة: {job.page_name}')
         if not job.lock.acquire(blocking=False):
             self.log(f'تخطي: رفع سابق قيد التنفيذ {job.page_name}')
             return
         try:
+            self.log(f'🔵 [DEBUG] القفل مكتسب، بدء _process_job: {job.page_name}')
             self._process_job(job)
+            self.log(f'🔵 [DEBUG] انتهى _process_job بنجاح: {job.page_name}')
         except Exception as e:
             # التقاط أي استثناء غير متوقع لمنع crash البرنامج
             NotificationSystem.notify(self.log, NotificationSystem.ERROR,
@@ -107,6 +112,7 @@ class SchedulerThread(threading.Thread):
         finally:
             try:
                 job.lock.release()
+                self.log(f'🔵 [DEBUG] تم تحرير القفل: {job.page_name}')
             except Exception:
                 pass  # تجاهل أي خطأ في تحرير القفل
 
@@ -118,6 +124,8 @@ class SchedulerThread(threading.Thread):
             move_video_to_uploaded_folder
         )
         from services import log_upload
+        
+        self.log(f'🔵 [DEBUG] بدء _process_job: {job.page_name}')
         
         # فحص الاتصال بالإنترنت قبل الرفع (Internet Safety Check)
         if self.internet_check_getter():
@@ -186,9 +194,11 @@ class SchedulerThread(threading.Thread):
 
         NotificationSystem.notify(self.log, NotificationSystem.UPLOAD,
             f'بدء رفع الفيديو: {os.path.basename(video_path)}', job.page_name)
-
+        
+        self.log(f'🔵 [DEBUG] استدعاء upload_video_once: {os.path.basename(video_path)}')
         status, body = upload_video_once(job, video_path, token, self.ui,
                                          job.title_template, job.description_template, self.log)
+        self.log(f'🔵 [DEBUG] انتهى upload_video_once - الحالة: {status}')
 
         # التحقق من نجاح الرفع ونقل الفيديو إلى مجلد Uploaded
         upload_success = is_upload_successful(status, body)
