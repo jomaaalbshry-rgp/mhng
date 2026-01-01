@@ -86,20 +86,26 @@ class StorySchedulerThread(threading.Thread):
 
                     # التحقق من وصول الوقت باستخدام job.next_run_timestamp
                     if now >= job.next_run_timestamp:
+                        self.log(f'🔵 [DEBUG] بدء جدولة رفع ستوري: {job.page_name}')
                         executor.submit(self._upload_wrapper, job)
                         # ضبط الوقت التالي بعد الرفع
                         job.reset_next_run_timestamp()
+                        self.log(f'🔵 [DEBUG] تم جدولة الرفع وضبط الوقت التالي: {job.page_name}')
                 time.sleep(1)
         self.log('توقف مجدول الستوري.')
 
     def _upload_wrapper(self, job: StoryJob):
+        self.log(f'🔵 [DEBUG] دخول _upload_wrapper للوظيفة: {job.page_name}')
         if not job.lock.acquire(blocking=False):
             self.log(f'تخطي: رفع ستوري سابق قيد التنفيذ {job.page_name}')
             return
         try:
+            self.log(f'🔵 [DEBUG] القفل مكتسب، بدء _process_story_job: {job.page_name}')
             self._process_story_job(job)
+            self.log(f'🔵 [DEBUG] انتهى _process_story_job بنجاح: {job.page_name}')
         finally:
             job.lock.release()
+            self.log(f'🔵 [DEBUG] تم تحرير القفل: {job.page_name}')
 
     def _process_story_job(self, job: StoryJob):
         """معالجة وظيفة ستوري واحدة مع حماية شاملة من الأخطاء."""
@@ -114,6 +120,8 @@ class StorySchedulerThread(threading.Thread):
         )
         from services import log_upload
 
+        self.log(f'🔵 [DEBUG] بدء _process_story_job: {job.page_name}')
+        
         try:
             # فحص الاتصال بالإنترنت قبل الرفع
             if self.internet_check_getter():
@@ -196,6 +204,8 @@ class StorySchedulerThread(threading.Thread):
 
             NotificationSystem.notify(self.log, NotificationSystem.UPLOAD,
                 f'بدء نشر {len(batch)} ستوري', job.page_name)
+            
+            self.log(f'🔵 [DEBUG] بدء رفع الدفعة - عدد الملفات: {len(batch)}')
 
             successful_count = 0
             failed_count = 0

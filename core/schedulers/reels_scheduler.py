@@ -83,20 +83,26 @@ class ReelsSchedulerThread(threading.Thread):
 
                     # التحقق من وصول الوقت باستخدام job.next_run_timestamp
                     if now >= job.next_run_timestamp:
+                        self.log(f'🔵 [DEBUG] بدء جدولة رفع ريلز: {job.page_name}')
                         executor.submit(self._upload_wrapper, job)
                         # ضبط الوقت التالي بعد الرفع
                         job.reset_next_run_timestamp()
+                        self.log(f'🔵 [DEBUG] تم جدولة الرفع وضبط الوقت التالي: {job.page_name}')
                 time.sleep(1)
         self.log('توقف مجدول الريلز.')
 
     def _upload_wrapper(self, job: ReelsJob):
+        self.log(f'🔵 [DEBUG] دخول _upload_wrapper للوظيفة: {job.page_name}')
         if not job.lock.acquire(blocking=False):
             self.log(f'تخطي: رفع ريلز سابق قيد التنفيذ {job.page_name}')
             return
         try:
+            self.log(f'🔵 [DEBUG] القفل مكتسب، بدء _process_reels_job: {job.page_name}')
             self._process_reels_job(job)
+            self.log(f'🔵 [DEBUG] انتهى _process_reels_job بنجاح: {job.page_name}')
         finally:
             job.lock.release()
+            self.log(f'🔵 [DEBUG] تم تحرير القفل: {job.page_name}')
 
     def _process_reels_job(self, job: ReelsJob):
         """معالجة وظيفة ريلز واحدة مع حماية شاملة من الأخطاء."""
@@ -112,6 +118,8 @@ class ReelsSchedulerThread(threading.Thread):
         from services import log_upload
         from core.utils import apply_title_placeholders
 
+        self.log(f'🔵 [DEBUG] بدء _process_reels_job: {job.page_name}')
+        
         try:
             # فحص الاتصال بالإنترنت قبل الرفع
             if self.internet_check_getter():
@@ -186,6 +194,7 @@ class ReelsSchedulerThread(threading.Thread):
             title = apply_title_placeholders(job.title_template, Path(video_path).name) if job.title_template else ''
             description = apply_title_placeholders(job.description_template, Path(video_path).name) if job.description_template else ''
 
+            self.log(f'🔵 [DEBUG] استدعاء upload_reels_with_retry: {Path(video_path).name}')
             # رفع الريلز
             status, body = upload_reels_with_retry(
                 page_id=job.page_id,
@@ -197,6 +206,8 @@ class ReelsSchedulerThread(threading.Thread):
                 progress_callback=lambda p: self.ui.progress_signal.emit(int(p), f'رفع الريلز {int(p)}%'),
                 stop_event=self.stop_event
             )
+            
+            self.log(f'🔵 [DEBUG] انتهى upload_reels_with_retry - الحالة: {status}')
 
             # التحقق من النجاح
             upload_success = is_reels_upload_successful(status, body)
