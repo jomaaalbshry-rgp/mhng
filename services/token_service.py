@@ -4,8 +4,19 @@ Token management functions for Facebook API tokens
 """
 
 from typing import Optional, Tuple
+import logging
 from services.facebook_api import FacebookAPIService
-from core import log_debug, log_error
+
+# إنشاء logger محلي لتجنب circular import
+_logger = logging.getLogger(__name__)
+
+def _log_debug(msg):
+    """تسجيل رسالة debug"""
+    _logger.debug(msg)
+
+def _log_error(msg):
+    """تسجيل رسالة خطأ"""
+    _logger.error(msg)
 
 
 def get_all_app_tokens(database_file: str, decrypt_fn) -> list:
@@ -21,14 +32,14 @@ def get_all_app_tokens(database_file: str, decrypt_fn) -> list:
         قائمة من القواميس تحتوي على بيانات التطبيقات
         List of dictionaries containing app data
     """
-    log_debug(f'[token_service.get_all_app_tokens] بدء جلب التوكينات من: {database_file}')
+    _log_debug(f'[token_service.get_all_app_tokens] بدء جلب التوكينات من: {database_file}')
     
     try:
         result = FacebookAPIService.get_all_app_tokens(database_file, decrypt_fn)
-        log_debug(f'[token_service.get_all_app_tokens] تم جلب {len(result) if result else 0} تطبيق')
+        _log_debug(f'[token_service.get_all_app_tokens] تم جلب {len(result) if result else 0} تطبيق')
         return result
     except Exception as e:
-        log_error(f'[token_service.get_all_app_tokens] خطأ: {e}')
+        _log_error(f'[token_service.get_all_app_tokens] خطأ: {e}')
         return []
 
 
