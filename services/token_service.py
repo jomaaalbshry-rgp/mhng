@@ -8,7 +8,13 @@ import logging
 from services.facebook_api import FacebookAPIService
 
 # إنشاء logger محلي لتجنب circular import
+# Configure basic logging to ensure messages are output
 _logger = logging.getLogger(__name__)
+if not _logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'))
+    _logger.addHandler(_handler)
+    _logger.setLevel(logging.DEBUG)
 
 def _log_debug(msg):
     """تسجيل رسالة debug"""
