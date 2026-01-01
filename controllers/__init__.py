@@ -12,6 +12,7 @@ from .video_controller import VideoController
 from .story_controller import StoryController
 from .reels_controller import ReelsController
 from .scheduler_controller import SchedulerController
+from .upload_controller import UploadController
 
 # Export Job classes and utility functions from controllers
 # For backward compatibility with code that imports directly
@@ -38,6 +39,7 @@ __all__ = [
     'StoryController',
     'ReelsController',
     'SchedulerController',
+    'UploadController',
     # Job classes
     'VideoJob',
     'PageJob',  # Backward compatibility alias for VideoJob
