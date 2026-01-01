@@ -525,6 +525,30 @@ class DatabaseManager:
                 log_error(f"[DB] This may cause 'table schedule_templates has no column named days' errors")
                 raise
         
+        # Check app_tokens table - إنشاء جدول التوكينات إذا لم يكن موجوداً
+        if not self.table_exists('app_tokens'):
+            log_info("[DB] Table 'app_tokens' does not exist - creating it")
+            try:
+                self.execute('''
+                    CREATE TABLE IF NOT EXISTS app_tokens (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        app_name TEXT NOT NULL,
+                        app_id TEXT NOT NULL,
+                        app_secret TEXT,
+                        short_lived_token TEXT,
+                        long_lived_token TEXT,
+                        token_expires_at TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                ''')
+                log_info("[DB] app_tokens table created with all required columns")
+            except sqlite3.Error as e:
+                log_error(f"[DB] Failed to create app_tokens table: {e}")
+                raise
+        else:
+            log_info("[DB] Table 'app_tokens' exists")
+        
         log_info("[DB] Schema migration complete")
     
     def ensure_default_templates(self, templates_list: Optional[List[dict]] = None):

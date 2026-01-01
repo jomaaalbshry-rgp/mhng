@@ -5,6 +5,7 @@ Token management functions for Facebook API tokens
 
 from typing import Optional, Tuple
 from services.facebook_api import FacebookAPIService
+from core import log_debug, log_error
 
 
 def get_all_app_tokens(database_file: str, decrypt_fn) -> list:
@@ -20,7 +21,15 @@ def get_all_app_tokens(database_file: str, decrypt_fn) -> list:
         قائمة من القواميس تحتوي على بيانات التطبيقات
         List of dictionaries containing app data
     """
-    return FacebookAPIService.get_all_app_tokens(database_file, decrypt_fn)
+    log_debug(f'[token_service.get_all_app_tokens] بدء جلب التوكينات من: {database_file}')
+    
+    try:
+        result = FacebookAPIService.get_all_app_tokens(database_file, decrypt_fn)
+        log_debug(f'[token_service.get_all_app_tokens] تم جلب {len(result) if result else 0} تطبيق')
+        return result
+    except Exception as e:
+        log_error(f'[token_service.get_all_app_tokens] خطأ: {e}')
+        return []
 
 
 def save_app_token(database_file: str, encrypt_fn, app_name: str, app_id: str, 

@@ -195,7 +195,13 @@ def get_all_app_tokens_wrapper() -> list:
     Compatibility wrapper for get_all_app_tokens.
     Calls token_service function with required parameters.
     """
-    return get_all_app_tokens(get_database_file(), simple_decrypt)
+    db_file = get_database_file()
+    log_debug(f'[get_all_app_tokens_wrapper] مسار قاعدة البيانات: {db_file}')
+    
+    result = get_all_app_tokens(db_file, simple_decrypt)
+    log_debug(f'[get_all_app_tokens_wrapper] عدد التطبيقات المُرجعة: {len(result) if result else 0}')
+    
+    return result
 
 
 def save_app_token_wrapper(app_name: str, app_id: str, app_secret: str = '',
@@ -1734,8 +1740,11 @@ class MainWindow(QMainWindow):
         """
         # الحصول على جميع التطبيقات (وليس فقط التوكينات)
         apps = get_all_app_tokens_wrapper()
+        
+        log_debug(f'[load_pages] عدد التطبيقات: {len(apps) if apps else 0}')
 
         if not apps:
+            log_error('[load_pages] لم يتم العثور على أي تطبيقات')
             QMessageBox.warning(
                 self,
                 'لا توجد تطبيقات',
@@ -1744,8 +1753,19 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # تسجيل تفاصيل كل تطبيق
+        for app in apps:
+            app_name = app.get('app_name', 'غير معروف')
+            has_long_token = bool(app.get('long_lived_token'))
+            log_debug(f'[load_pages] تطبيق: {app_name}, لديه توكن طويل: {has_long_token}')
+
         # التحقق من وجود توكينات طويلة
         apps_with_tokens = [app for app in apps if app.get('long_lived_token')]
+        
+        log_info(f'[load_pages] التطبيقات مع توكينات طويلة: {len(apps_with_tokens)}')
+        
+        if not apps_with_tokens:
+            log_error('[load_pages] لا توجد تطبيقات بتوكينات طويلة')
         
         # تفويض عملية الجلب إلى PagesPanel
         self.pages_panel.load_pages(apps_with_tokens)
